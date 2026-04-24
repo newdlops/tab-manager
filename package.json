@@ -1,0 +1,440 @@
+{
+  "name": "tab-manager",
+  "displayName": "Tab Manager",
+  "description": "Group, filter, and sort open tabs and workspace files from the activity bar and Explorer.",
+  "version": "0.1.0",
+  "publisher": "local",
+  "license": "MIT",
+  "icon": "media/icon.png",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other", "Visualization"],
+  "keywords": [
+    "tabs",
+    "tab manager",
+    "explorer",
+    "workspace",
+    "filter",
+    "modified",
+    "untracked",
+    "errors",
+    "group"
+  ],
+  "activationEvents": ["onStartupFinished"],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "tabManager",
+          "title": "Tab Manager",
+          "icon": "media/tab-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "tabManager": [
+        {
+          "id": "tabManagerView",
+          "name": "Open Tabs"
+        }
+      ],
+      "explorer": [
+        {
+          "id": "tabManagerExplorer",
+          "name": "Workspace",
+          "visibility": "visible",
+          "order": 0
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "tabManagerView",
+        "contents": "No tabs are open."
+      },
+      {
+        "view": "tabManagerExplorer",
+        "contents": "No workspace folder is open.",
+        "when": "workbenchState == empty"
+      }
+    ],
+    "commands": [
+      {
+        "command": "tabManager.createGroup",
+        "title": "New Group",
+        "icon": "$(new-folder)",
+        "category": "Tab Manager"
+      },
+      {
+        "command": "tabManager.renameGroup",
+        "title": "Rename Group",
+        "category": "Tab Manager"
+      },
+      {
+        "command": "tabManager.deleteGroup",
+        "title": "Delete Group",
+        "icon": "$(trash)",
+        "category": "Tab Manager"
+      },
+      {
+        "command": "tabManager.closeTab",
+        "title": "Close Tab",
+        "icon": "$(close)",
+        "category": "Tab Manager"
+      },
+      {
+        "command": "tabManager.closeSelected",
+        "title": "Close Selected Tabs",
+        "icon": "$(close-all)",
+        "category": "Tab Manager"
+      },
+      {
+        "command": "tabManager.addToGroup",
+        "title": "Add to Group...",
+        "category": "Tab Manager"
+      },
+      {
+        "command": "tabManager.removeFromGroup",
+        "title": "Remove from Group",
+        "category": "Tab Manager"
+      },
+      {
+        "command": "tabManager.sort.nameAsc",
+        "title": "Sort by Name (Ascending)",
+        "category": "Tab Manager"
+      },
+      {
+        "command": "tabManager.sort.nameDesc",
+        "title": "Sort by Name (Descending)",
+        "category": "Tab Manager"
+      },
+      {
+        "command": "tabManager.sort.nameNone",
+        "title": "No Name Sort",
+        "category": "Tab Manager"
+      },
+      {
+        "command": "tabManager.sort.toggleType",
+        "title": "Sort by Type",
+        "category": "Tab Manager"
+      },
+      {
+        "command": "tabManager.filter.modified",
+        "title": "Show Modified Only",
+        "icon": "$(diff-modified)",
+        "category": "Tab Manager"
+      },
+      {
+        "command": "tabManager.filter.untracked",
+        "title": "Show Untracked Only",
+        "icon": "$(diff-added)",
+        "category": "Tab Manager"
+      },
+      {
+        "command": "tabManager.filter.deleted",
+        "title": "Show Deleted Only",
+        "icon": "$(diff-removed)",
+        "category": "Tab Manager"
+      },
+      {
+        "command": "tabManager.filter.errors",
+        "title": "Show Errors Only",
+        "icon": "$(error)",
+        "category": "Tab Manager"
+      },
+      {
+        "command": "tabManager.filter.clear",
+        "title": "Clear Filter",
+        "icon": "$(clear-all)",
+        "category": "Tab Manager"
+      },
+      {
+        "command": "tabManager.filter.tabsOnly",
+        "title": "Show Open Tabs Only",
+        "icon": "$(files)",
+        "category": "Tab Manager"
+      },
+      {
+        "command": "tabManager.explorer.newFile",
+        "title": "New File...",
+        "icon": "$(new-file)",
+        "category": "Extended Explorer"
+      },
+      {
+        "command": "tabManager.explorer.newFolder",
+        "title": "New Folder...",
+        "icon": "$(new-folder)",
+        "category": "Extended Explorer"
+      },
+      {
+        "command": "tabManager.explorer.refresh",
+        "title": "Refresh Explorer",
+        "icon": "$(refresh)",
+        "category": "Extended Explorer"
+      },
+      {
+        "command": "tabManager.explorer.rename",
+        "title": "Rename...",
+        "category": "Extended Explorer"
+      },
+      {
+        "command": "tabManager.explorer.delete",
+        "title": "Delete",
+        "category": "Extended Explorer"
+      },
+      {
+        "command": "tabManager.explorer.copyPath",
+        "title": "Copy Path",
+        "category": "Extended Explorer"
+      },
+      {
+        "command": "tabManager.explorer.copyRelativePath",
+        "title": "Copy Relative Path",
+        "category": "Extended Explorer"
+      },
+      {
+        "command": "tabManager.explorer.revealInOS",
+        "title": "Reveal in File Explorer",
+        "category": "Extended Explorer"
+      },
+      {
+        "command": "tabManager.explorer.openInTerminal",
+        "title": "Open in Integrated Terminal",
+        "category": "Extended Explorer"
+      },
+      {
+        "command": "tabManager.explorer.openToSide",
+        "title": "Open to the Side",
+        "category": "Extended Explorer"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "tabManager.createGroup",
+          "when": "view == tabManagerView",
+          "group": "navigation@1"
+        },
+        {
+          "command": "tabManager.closeSelected",
+          "when": "view == tabManagerView",
+          "group": "navigation@2"
+        },
+        {
+          "command": "tabManager.explorer.newFile",
+          "when": "view == tabManagerExplorer",
+          "group": "navigation@1"
+        },
+        {
+          "command": "tabManager.explorer.newFolder",
+          "when": "view == tabManagerExplorer",
+          "group": "navigation@2"
+        },
+        {
+          "command": "tabManager.explorer.refresh",
+          "when": "view == tabManagerExplorer",
+          "group": "navigation@3"
+        },
+        {
+          "command": "tabManager.filter.modified",
+          "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/",
+          "group": "navigation@10"
+        },
+        {
+          "command": "tabManager.filter.errors",
+          "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/",
+          "group": "navigation@11"
+        },
+        {
+          "command": "tabManager.filter.untracked",
+          "title": "✓ Show Untracked Only",
+          "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.filterMode == 'untracked'",
+          "group": "3_filter@1"
+        },
+        {
+          "command": "tabManager.filter.untracked",
+          "title": "Show Untracked Only",
+          "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.filterMode != 'untracked'",
+          "group": "3_filter@1"
+        },
+        {
+          "command": "tabManager.filter.deleted",
+          "title": "✓ Show Deleted Only",
+          "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.filterMode == 'deleted'",
+          "group": "3_filter@2"
+        },
+        {
+          "command": "tabManager.filter.deleted",
+          "title": "Show Deleted Only",
+          "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.filterMode != 'deleted'",
+          "group": "3_filter@2"
+        },
+        {
+          "command": "tabManager.filter.tabsOnly",
+          "title": "✓ Show Open Tabs Only",
+          "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.filterMode == 'tabsOnly'",
+          "group": "3_filter@3"
+        },
+        {
+          "command": "tabManager.filter.tabsOnly",
+          "title": "Show Open Tabs Only",
+          "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.filterMode != 'tabsOnly'",
+          "group": "3_filter@3"
+        },
+        {
+          "command": "tabManager.filter.clear",
+          "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.filterMode != 'none'",
+          "group": "3_filter@4"
+        },
+        {
+          "command": "tabManager.sort.nameAsc",
+          "title": "✓ Sort by Name (Ascending)",
+          "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.sortName == 'asc'",
+          "group": "1_sortName@1"
+        },
+        {
+          "command": "tabManager.sort.nameAsc",
+          "title": "Sort by Name (Ascending)",
+          "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.sortName != 'asc'",
+          "group": "1_sortName@1"
+        },
+        {
+          "command": "tabManager.sort.nameDesc",
+          "title": "✓ Sort by Name (Descending)",
+          "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.sortName == 'desc'",
+          "group": "1_sortName@2"
+        },
+        {
+          "command": "tabManager.sort.nameDesc",
+          "title": "Sort by Name (Descending)",
+          "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.sortName != 'desc'",
+          "group": "1_sortName@2"
+        },
+        {
+          "command": "tabManager.sort.nameNone",
+          "title": "✓ No Name Sort",
+          "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.sortName == 'none'",
+          "group": "1_sortName@3"
+        },
+        {
+          "command": "tabManager.sort.nameNone",
+          "title": "No Name Sort",
+          "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.sortName != 'none'",
+          "group": "1_sortName@3"
+        },
+        {
+          "command": "tabManager.sort.toggleType",
+          "title": "✓ Sort by Type",
+          "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.sortType",
+          "group": "2_sortType@1"
+        },
+        {
+          "command": "tabManager.sort.toggleType",
+          "title": "Sort by Type",
+          "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && !tabManager.sortType",
+          "group": "2_sortType@1"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "tabManager.closeTab",
+          "when": "view == tabManagerView && viewItem =~ /^tab(\\.grouped)?$/",
+          "group": "inline@1"
+        },
+        {
+          "command": "tabManager.closeTab",
+          "when": "view == tabManagerView && viewItem =~ /^tab(\\.grouped)?$/",
+          "group": "1_close@1"
+        },
+        {
+          "command": "tabManager.closeSelected",
+          "when": "view == tabManagerView && viewItem =~ /^tab(\\.grouped)?$/",
+          "group": "1_close@2"
+        },
+        {
+          "command": "tabManager.addToGroup",
+          "when": "view == tabManagerView && viewItem =~ /^tab(\\.grouped)?$/",
+          "group": "2_group@1"
+        },
+        {
+          "command": "tabManager.removeFromGroup",
+          "when": "view == tabManagerView && viewItem == tab.grouped",
+          "group": "2_group@2"
+        },
+        {
+          "command": "tabManager.renameGroup",
+          "when": "view == tabManagerView && viewItem == tabGroup",
+          "group": "1_group@1"
+        },
+        {
+          "command": "tabManager.deleteGroup",
+          "when": "view == tabManagerView && viewItem == tabGroup",
+          "group": "1_group@2"
+        },
+        {
+          "command": "tabManager.explorer.openToSide",
+          "when": "view == tabManagerExplorer && viewItem == file",
+          "group": "navigation@2"
+        },
+        {
+          "command": "tabManager.explorer.revealInOS",
+          "when": "view == tabManagerExplorer && viewItem =~ /^(file|directory|workspaceFolder)$/",
+          "group": "2_reveal@1"
+        },
+        {
+          "command": "tabManager.explorer.openInTerminal",
+          "when": "view == tabManagerExplorer && viewItem =~ /^(directory|workspaceFolder)$/",
+          "group": "2_reveal@2"
+        },
+        {
+          "command": "tabManager.explorer.copyPath",
+          "when": "view == tabManagerExplorer && viewItem =~ /^(file|directory|workspaceFolder)$/",
+          "group": "3_path@1"
+        },
+        {
+          "command": "tabManager.explorer.copyRelativePath",
+          "when": "view == tabManagerExplorer && viewItem =~ /^(file|directory|workspaceFolder)$/",
+          "group": "3_path@2"
+        },
+        {
+          "command": "tabManager.explorer.rename",
+          "when": "view == tabManagerExplorer && viewItem =~ /^(file|directory)$/",
+          "group": "4_modify@1"
+        },
+        {
+          "command": "tabManager.explorer.delete",
+          "when": "view == tabManagerExplorer && viewItem =~ /^(file|directory)$/",
+          "group": "4_modify@2"
+        },
+        {
+          "command": "tabManager.explorer.newFile",
+          "when": "view == tabManagerExplorer && viewItem =~ /^(directory|workspaceFolder)$/",
+          "group": "5_new@1"
+        },
+        {
+          "command": "tabManager.explorer.newFolder",
+          "when": "view == tabManagerExplorer && viewItem =~ /^(directory|workspaceFolder)$/",
+          "group": "5_new@2"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "npm run check-types && node esbuild.js",
+    "watch": "npm-run-all -p watch:esbuild watch:tsc",
+    "watch:esbuild": "node esbuild.js --watch",
+    "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
+    "package": "npm run check-types && node esbuild.js --production",
+    "check-types": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "esbuild": "^0.24.0",
+    "npm-run-all": "^4.1.5",
+    "typescript": "^5.5.0"
+  }
+}
