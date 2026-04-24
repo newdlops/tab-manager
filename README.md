@@ -126,27 +126,20 @@ media/
 
 ## Packaging & publishing
 
-Install the extension packager:
+`@vscode/vsce` is already installed locally as a devDependency.
 
-```bash
-npm install -g @vscode/vsce
-```
+Before first publish, replace the placeholder values in `package.json`:
 
-Then update `package.json`:
-
-1. `publisher` → your marketplace publisher ID (create one at <https://marketplace.visualstudio.com/manage>)
-2. `repository` → add your git repository URL, for example:
-   ```json
-   "repository": { "type": "git", "url": "https://github.com/you/tab-manager.git" }
-   ```
+1. `publisher` — `"local"` → your marketplace publisher ID (create one at <https://marketplace.visualstudio.com/manage>)
+2. `repository.url`, `bugs.url`, `homepage` — replace `REPLACE_ME` with your GitHub (or GitLab/etc.) username
 3. Bump `version` for every publish
 
-Package / publish:
+Then:
 
 ```bash
-vsce package           # produces tab-manager-<version>.vsix
-vsce login <publisher>
-vsce publish
+npm run vsce:package       # produces tab-manager-<version>.vsix
+npx vsce login <publisher>
+npm run vsce:publish
 ```
 
 ### What ends up in the `.vsix`

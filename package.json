@@ -3,9 +3,23 @@
   "displayName": "Tab Manager",
   "description": "Group, filter, and sort open tabs and workspace files from the activity bar and Explorer.",
   "version": "0.1.0",
-  "publisher": "local",
+  "publisher": "newdlops",
   "license": "MIT",
   "icon": "media/icon.png",
+  "preview": true,
+  "qna": false,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/newdlops/tab-manager.git"
+  },
+  "bugs": {
+    "url": "https://github.com/newdlops/tab-manager/issues"
+  },
+  "homepage": "https://github.com/newdlops/tab-manager#readme",
+  "galleryBanner": {
+    "color": "#1E88E5",
+    "theme": "dark"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -19,7 +33,9 @@
     "modified",
     "untracked",
     "errors",
-    "group"
+    "group",
+    "sort",
+    "productivity"
   ],
   "activationEvents": ["onStartupFinished"],
   "main": "./dist/extension.js",
@@ -428,11 +444,15 @@
     "watch:esbuild": "node esbuild.js --watch",
     "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
     "package": "npm run check-types && node esbuild.js --production",
-    "check-types": "tsc --noEmit"
+    "check-types": "tsc --noEmit",
+    "vsce:package": "vsce package --no-dependencies",
+    "vsce:publish": "vsce publish --no-dependencies",
+    "clean": "rm -rf dist out *.vsix"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
     "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.2.0",
     "esbuild": "^0.24.0",
     "npm-run-all": "^4.1.5",
     "typescript": "^5.5.0"
