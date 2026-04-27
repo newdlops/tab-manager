@@ -67,9 +67,16 @@ export function parentUri(uri: vscode.Uri): vscode.Uri {
   return uri.with({ path: path.posix.dirname(uri.path) });
 }
 
-export class ExplorerProvider implements vscode.TreeDataProvider<FileTreeNode> {
+const INTERNAL_MIME = 'application/vnd.code.tree.tabmanagerexplorer';
+
+export class ExplorerProvider
+  implements vscode.TreeDataProvider<FileTreeNode>, vscode.TreeDragAndDropController<FileTreeNode>
+{
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<FileTreeNode | undefined>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
+
+  readonly dropMimeTypes = [INTERNAL_MIME, 'text/uri-list'];
+  readonly dragMimeTypes = ['text/uri-list'];
 
   private cache?: { mode: FilterMode; matching: Set<string>; ancestors: Set<string> };
   private readonly dirCache = new Map<string, [string, vscode.FileType][]>();
@@ -81,6 +88,75 @@ export class ExplorerProvider implements vscode.TreeDataProvider<FileTreeNode> {
   ) {
     store.onDidChange(() => this.refreshFilter());
     filter.onDidChange(() => this.refreshFilter());
+  }
+
+  handleDrag(
+    source: readonly FileTreeNode[],
+    dataTransfer: vscode.DataTransfer,
+  ): void {
+    const uris = source.map(nodeUri).filter((u): u is vscode.Uri => u !== undefined);
+    if (uris.length === 0) return;
+    dataTransfer.set(INTERNAL_MIME, new vscode.DataTransferItem(uris));
+    dataTransfer.set(
+      'text/uri-list',
+      new vscode.DataTransferItem(uris.map((u) => u.toString()).join('\r\n')),
+    );
+  }
+
+  async handleDrop(
+    target: FileTreeNode | undefined,
+    dataTransfer: vscode.DataTransfer,
+  ): Promise<void> {
+    const dest = await resolveDropDestination(target);
+    if (!dest) return;
+
+    let sources: vscode.Uri[] = [];
+    const internal = dataTransfer.get(INTERNAL_MIME);
+    if (internal) {
+      const v = internal.value;
+      if (Array.isArray(v)) sources = v.filter((x): x is vscode.Uri => x instanceof vscode.Uri);
+    } else {
+      const external = dataTransfer.get('text/uri-list');
+      if (external) {
+        const text = await external.asString();
+        sources = text
+          .split(/\r?\n/)
+          .map((s) => s.trim())
+          .filter((s) => s && !s.startsWith('#'))
+          .map((s) => {
+            try {
+              return vscode.Uri.parse(s);
+            } catch {
+              return undefined;
+            }
+          })
+          .filter((u): u is vscode.Uri => u !== undefined);
+      }
+    }
+    if (sources.length === 0) return;
+
+    for (const src of sources) {
+      if (isSameOrAncestor(src, dest)) continue;
+      const name = baseName(src);
+      const newUri = vscode.Uri.joinPath(dest, name);
+      if (newUri.toString() === src.toString()) continue;
+      try {
+        if (await uriExists(newUri)) {
+          const pick = await vscode.window.showWarningMessage(
+            `"${name}" already exists in destination. Overwrite?`,
+            { modal: true },
+            'Overwrite',
+            'Skip',
+          );
+          if (pick !== 'Overwrite') continue;
+          await vscode.workspace.fs.rename(src, newUri, { overwrite: true });
+        } else {
+          await vscode.workspace.fs.rename(src, newUri, { overwrite: false });
+        }
+      } catch (e) {
+        vscode.window.showErrorMessage(`Failed to move ${name}: ${String(e)}`);
+      }
+    }
   }
 
   refresh(): void {
@@ -218,6 +294,40 @@ export class ExplorerProvider implements vscode.TreeDataProvider<FileTreeNode> {
       }
     }
     this.cache = { mode, matching, ancestors };
+  }
+}
+
+function nodeUri(node: FileTreeNode): vscode.Uri | undefined {
+  if (node instanceof WorkspaceFolderNode) return node.folder.uri;
+  if (node instanceof DirectoryNode) return node.uri;
+  if (node instanceof FileNode) return node.uri;
+  return undefined;
+}
+
+async function resolveDropDestination(
+  target: FileTreeNode | undefined,
+): Promise<vscode.Uri | undefined> {
+  if (target instanceof WorkspaceFolderNode) return target.folder.uri;
+  if (target instanceof DirectoryNode) return target.uri;
+  if (target instanceof FileNode) return parentUri(target.uri);
+  const folders = vscode.workspace.workspaceFolders ?? [];
+  if (folders.length === 1) return folders[0].uri;
+  return undefined;
+}
+
+function isSameOrAncestor(src: vscode.Uri, candidate: vscode.Uri): boolean {
+  const s = src.toString();
+  const c = candidate.toString();
+  if (s === c) return true;
+  return c.startsWith(s + '/');
+}
+
+async function uriExists(uri: vscode.Uri): Promise<boolean> {
+  try {
+    await vscode.workspace.fs.stat(uri);
+    return true;
+  } catch {
+    return false;
   }
 }
 

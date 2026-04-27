@@ -14,12 +14,48 @@ import type { FilterSource } from './filterSource';
 
 type AnyNode = FileTreeNode;
 
+interface ClipboardState {
+  mode: 'cut' | 'copy';
+  uris: vscode.Uri[];
+}
+
+let clipboard: ClipboardState | undefined;
+let compareLeft: vscode.Uri | undefined;
+
 export function registerExplorerCommands(
   context: vscode.ExtensionContext,
   provider: ExplorerProvider,
   filesView: vscode.TreeView<FileTreeNode>,
   filterSource: FilterSource,
 ): void {
+  const selectedNodes = (fallback?: AnyNode): AnyNode[] => {
+    const sel = filesView.selection;
+    if (sel.length > 0) return [...sel];
+    return fallback ? [fallback] : [];
+  };
+  const selectedUris = (fallback?: AnyNode): vscode.Uri[] => {
+    return selectedNodes(fallback)
+      .map(uriOf)
+      .filter((u): u is vscode.Uri => u !== undefined);
+  };
+
+  const updateClipboardContext = () => {
+    void vscode.commands.executeCommand(
+      'setContext',
+      'tabManager.explorerHasClipboard',
+      !!clipboard,
+    );
+  };
+  const updateCompareContext = () => {
+    void vscode.commands.executeCommand(
+      'setContext',
+      'tabManager.explorerHasCompareLeft',
+      !!compareLeft,
+    );
+  };
+  updateClipboardContext();
+  updateCompareContext();
+
   context.subscriptions.push(
     vscode.commands.registerCommand('tabManager.explorer.refresh', async () => {
       await filterSource.refresh();
@@ -36,8 +72,10 @@ export function registerExplorerCommands(
 
     vscode.commands.registerCommand(
       'tabManager.explorer.rename',
-      async (node: FileNode | DirectoryNode) => {
-        const oldUri = node.uri;
+      async (node?: FileNode | DirectoryNode) => {
+        const target = node ?? selectedNodes()[0];
+        if (!(target instanceof FileNode || target instanceof DirectoryNode)) return;
+        const oldUri = target.uri;
         const current = baseName(oldUri);
         const name = await vscode.window.showInputBox({
           prompt: 'New name',
@@ -58,45 +96,57 @@ export function registerExplorerCommands(
       },
     ),
 
-    vscode.commands.registerCommand(
-      'tabManager.explorer.delete',
-      async (node: FileNode | DirectoryNode) => {
-        const name = baseName(node.uri);
-        const pick = await vscode.window.showWarningMessage(
-          `Delete "${name}"?`,
-          { modal: true, detail: 'The item will be moved to the Trash.' },
-          'Delete',
-        );
-        if (pick !== 'Delete') return;
-        await vscode.workspace.fs.delete(node.uri, { recursive: true, useTrash: true });
-      },
-    ),
+    vscode.commands.registerCommand('tabManager.explorer.delete', async (node?: AnyNode) => {
+      const targets = selectedUris(node).filter((u) => isModifiable(u));
+      if (targets.length === 0) return;
+      const detail =
+        targets.length === 1
+          ? `"${baseName(targets[0])}" will be moved to the Trash.`
+          : `${targets.length} items will be moved to the Trash.`;
+      const message =
+        targets.length === 1 ? `Delete "${baseName(targets[0])}"?` : `Delete ${targets.length} items?`;
+      const pick = await vscode.window.showWarningMessage(
+        message,
+        { modal: true, detail },
+        'Delete',
+      );
+      if (pick !== 'Delete') return;
+      for (const uri of targets) {
+        try {
+          await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: true });
+        } catch (e) {
+          vscode.window.showErrorMessage(`Failed to delete ${baseName(uri)}: ${String(e)}`);
+        }
+      }
+    }),
 
-    vscode.commands.registerCommand('tabManager.explorer.copyPath', async (node: AnyNode) => {
-      const uri = uriOf(node);
-      if (!uri) return;
-      await vscode.env.clipboard.writeText(uri.fsPath);
+    vscode.commands.registerCommand('tabManager.explorer.copyPath', async (node?: AnyNode) => {
+      const uris = selectedUris(node);
+      if (uris.length === 0) return;
+      await vscode.env.clipboard.writeText(uris.map((u) => u.fsPath).join('\n'));
     }),
 
     vscode.commands.registerCommand(
       'tabManager.explorer.copyRelativePath',
-      async (node: AnyNode) => {
-        const uri = uriOf(node);
-        if (!uri) return;
-        await vscode.env.clipboard.writeText(vscode.workspace.asRelativePath(uri, false));
+      async (node?: AnyNode) => {
+        const uris = selectedUris(node);
+        if (uris.length === 0) return;
+        await vscode.env.clipboard.writeText(
+          uris.map((u) => vscode.workspace.asRelativePath(u, false)).join('\n'),
+        );
       },
     ),
 
-    vscode.commands.registerCommand('tabManager.explorer.revealInOS', async (node: AnyNode) => {
-      const uri = uriOf(node);
+    vscode.commands.registerCommand('tabManager.explorer.revealInOS', async (node?: AnyNode) => {
+      const uri = selectedUris(node)[0];
       if (!uri) return;
       await vscode.commands.executeCommand('revealFileInOS', uri);
     }),
 
     vscode.commands.registerCommand(
       'tabManager.explorer.openInTerminal',
-      async (node: WorkspaceFolderNode | DirectoryNode) => {
-        const uri = uriOf(node);
+      async (node?: AnyNode) => {
+        const uri = selectedUris(node)[0];
         if (!uri) return;
         const terminal = vscode.window.createTerminal({
           cwd: uri,
@@ -106,8 +156,131 @@ export function registerExplorerCommands(
       },
     ),
 
-    vscode.commands.registerCommand('tabManager.explorer.openToSide', async (node: FileNode) => {
-      await vscode.commands.executeCommand('vscode.open', node.uri, vscode.ViewColumn.Beside);
+    vscode.commands.registerCommand('tabManager.explorer.openToSide', async (node?: AnyNode) => {
+      const uris = selectedUris(node).filter(
+        (u, i, arr) => arr.findIndex((v) => v.toString() === u.toString()) === i,
+      );
+      for (const uri of uris) {
+        try {
+          await vscode.commands.executeCommand('vscode.open', uri, vscode.ViewColumn.Beside);
+        } catch {
+          /* skip non-files */
+        }
+      }
+    }),
+
+    vscode.commands.registerCommand('tabManager.explorer.openWith', async (node?: AnyNode) => {
+      const uri = selectedUris(node)[0];
+      if (!uri) return;
+      await vscode.commands.executeCommand('explorer.openWith', uri);
+    }),
+
+    vscode.commands.registerCommand(
+      'tabManager.explorer.findInFolder',
+      async (node?: AnyNode) => {
+        const uri = selectedUris(node)[0];
+        if (!uri) return;
+        const rel = vscode.workspace.asRelativePath(uri, false);
+        await vscode.commands.executeCommand('workbench.action.findInFiles', {
+          filesToInclude: rel,
+          triggerSearch: false,
+        });
+      },
+    ),
+
+    vscode.commands.registerCommand('tabManager.explorer.cut', async (node?: AnyNode) => {
+      const uris = selectedUris(node).filter(isModifiable);
+      if (uris.length === 0) return;
+      clipboard = { mode: 'cut', uris };
+      updateClipboardContext();
+    }),
+
+    vscode.commands.registerCommand('tabManager.explorer.copy', async (node?: AnyNode) => {
+      const uris = selectedUris(node);
+      if (uris.length === 0) return;
+      clipboard = { mode: 'copy', uris };
+      updateClipboardContext();
+    }),
+
+    vscode.commands.registerCommand('tabManager.explorer.paste', async (node?: AnyNode) => {
+      if (!clipboard || clipboard.uris.length === 0) return;
+      const target = await resolveContainer(node ?? selectedNodes()[0]);
+      if (!target) return;
+      const move = clipboard.mode === 'cut';
+      const sources = clipboard.uris;
+
+      for (const src of sources) {
+        const name = baseName(src);
+        let destUri = vscode.Uri.joinPath(target, name);
+        if (src.toString() === destUri.toString()) {
+          if (move) continue;
+          destUri = await uniqueDestination(target, name);
+        } else if (await exists(destUri)) {
+          if (move) {
+            const pick = await vscode.window.showWarningMessage(
+              `"${name}" already exists. Overwrite?`,
+              { modal: true },
+              'Overwrite',
+              'Skip',
+            );
+            if (pick !== 'Overwrite') continue;
+          } else {
+            destUri = await uniqueDestination(target, name);
+          }
+        }
+        try {
+          if (move) {
+            await vscode.workspace.fs.rename(src, destUri, { overwrite: true });
+          } else {
+            await vscode.workspace.fs.copy(src, destUri, { overwrite: true });
+          }
+        } catch (e) {
+          vscode.window.showErrorMessage(`Failed to ${move ? 'move' : 'copy'} ${name}: ${String(e)}`);
+        }
+      }
+
+      if (move) {
+        clipboard = undefined;
+        updateClipboardContext();
+      }
+    }),
+
+    vscode.commands.registerCommand(
+      'tabManager.explorer.selectForCompare',
+      async (node?: AnyNode) => {
+        const uri = selectedUris(node)[0];
+        if (!uri) return;
+        compareLeft = uri;
+        updateCompareContext();
+      },
+    ),
+
+    vscode.commands.registerCommand(
+      'tabManager.explorer.compareWithSelected',
+      async (node?: AnyNode) => {
+        const right = selectedUris(node)[0];
+        if (!right || !compareLeft) return;
+        await vscode.commands.executeCommand(
+          'vscode.diff',
+          compareLeft,
+          right,
+          `${baseName(compareLeft)} ↔ ${baseName(right)}`,
+        );
+      },
+    ),
+
+    vscode.commands.registerCommand('tabManager.explorer.compareSelected', async () => {
+      const uris = selectedUris().filter((_, i, arr) => i === arr.findIndex((v) => v.toString() === arr[i].toString()));
+      if (uris.length !== 2) {
+        vscode.window.showInformationMessage('Select exactly two files to compare.');
+        return;
+      }
+      await vscode.commands.executeCommand(
+        'vscode.diff',
+        uris[0],
+        uris[1],
+        `${baseName(uris[0])} ↔ ${baseName(uris[1])}`,
+      );
     }),
   );
 }
@@ -118,12 +291,13 @@ async function startInlineCreate(
   triggerNode: AnyNode | undefined,
   kind: PendingKind,
 ): Promise<void> {
-  const dir = await resolveContainer(triggerNode);
+  const dir = await resolveContainer(triggerNode ?? filesView.selection[0]);
   if (!dir) return;
 
-  if (triggerNode && !(triggerNode instanceof PendingNode)) {
+  const reveal = triggerNode ?? filesView.selection[0];
+  if (reveal && !(reveal instanceof PendingNode)) {
     try {
-      await filesView.reveal(triggerNode, { expand: true, select: false, focus: false });
+      await filesView.reveal(reveal, { expand: true, select: false, focus: false });
     } catch {
       /* element may be stale — isPendingAncestor handles expansion as fallback */
     }
@@ -194,6 +368,11 @@ function uriOf(node: AnyNode): vscode.Uri | undefined {
   return undefined;
 }
 
+function isModifiable(uri: vscode.Uri): boolean {
+  const folders = vscode.workspace.workspaceFolders ?? [];
+  return !folders.some((f) => f.uri.toString() === uri.toString());
+}
+
 async function exists(uri: vscode.Uri): Promise<boolean> {
   try {
     await vscode.workspace.fs.stat(uri);
@@ -201,6 +380,17 @@ async function exists(uri: vscode.Uri): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function uniqueDestination(parent: vscode.Uri, name: string): Promise<vscode.Uri> {
+  const dot = name.lastIndexOf('.');
+  const stem = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : '';
+  for (let i = 1; i < 1000; i++) {
+    const candidate = vscode.Uri.joinPath(parent, `${stem} copy${i === 1 ? '' : ' ' + i}${ext}`);
+    if (!(await exists(candidate))) return candidate;
+  }
+  return vscode.Uri.joinPath(parent, `${stem}-${Date.now()}${ext}`);
 }
 
 async function resolveContainer(node?: AnyNode): Promise<vscode.Uri | undefined> {
@@ -221,3 +411,4 @@ async function resolveContainer(node?: AnyNode): Promise<vscode.Uri | undefined>
   );
   return pick?.uri;
 }
+

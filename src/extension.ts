@@ -21,6 +21,8 @@ export function activate(context: vscode.ExtensionContext) {
   const filesView = vscode.window.createTreeView('tabManagerExplorer', {
     treeDataProvider: explorerProvider,
     showCollapseAll: true,
+    canSelectMany: true,
+    dragAndDropController: explorerProvider,
   });
 
   const scheduleTabRefresh = debounce(() => provider.refresh(), 30);

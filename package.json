@@ -2,7 +2,7 @@
   "name": "tab-manager",
   "displayName": "Tab Manager",
   "description": "Group, filter, and sort open tabs and workspace files from the activity bar and Explorer.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "newdlops",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -224,6 +224,46 @@
         "command": "tabManager.explorer.openToSide",
         "title": "Open to the Side",
         "category": "Extended Explorer"
+      },
+      {
+        "command": "tabManager.explorer.openWith",
+        "title": "Open With...",
+        "category": "Extended Explorer"
+      },
+      {
+        "command": "tabManager.explorer.findInFolder",
+        "title": "Find in Folder...",
+        "category": "Extended Explorer"
+      },
+      {
+        "command": "tabManager.explorer.cut",
+        "title": "Cut",
+        "category": "Extended Explorer"
+      },
+      {
+        "command": "tabManager.explorer.copy",
+        "title": "Copy",
+        "category": "Extended Explorer"
+      },
+      {
+        "command": "tabManager.explorer.paste",
+        "title": "Paste",
+        "category": "Extended Explorer"
+      },
+      {
+        "command": "tabManager.explorer.selectForCompare",
+        "title": "Select for Compare",
+        "category": "Extended Explorer"
+      },
+      {
+        "command": "tabManager.explorer.compareWithSelected",
+        "title": "Compare with Selected",
+        "category": "Extended Explorer"
+      },
+      {
+        "command": "tabManager.explorer.compareSelected",
+        "title": "Compare Selected",
+        "category": "Extended Explorer"
       }
     ],
     "menus": {
@@ -395,47 +435,142 @@
           "group": "navigation@2"
         },
         {
+          "command": "tabManager.explorer.openWith",
+          "when": "view == tabManagerExplorer && viewItem == file",
+          "group": "navigation@3"
+        },
+        {
           "command": "tabManager.explorer.revealInOS",
           "when": "view == tabManagerExplorer && viewItem =~ /^(file|directory|workspaceFolder)$/",
-          "group": "2_reveal@1"
+          "group": "2_workspace@1"
         },
         {
           "command": "tabManager.explorer.openInTerminal",
           "when": "view == tabManagerExplorer && viewItem =~ /^(directory|workspaceFolder)$/",
-          "group": "2_reveal@2"
+          "group": "2_workspace@2"
         },
         {
-          "command": "tabManager.explorer.copyPath",
-          "when": "view == tabManagerExplorer && viewItem =~ /^(file|directory|workspaceFolder)$/",
-          "group": "3_path@1"
-        },
-        {
-          "command": "tabManager.explorer.copyRelativePath",
-          "when": "view == tabManagerExplorer && viewItem =~ /^(file|directory|workspaceFolder)$/",
-          "group": "3_path@2"
-        },
-        {
-          "command": "tabManager.explorer.rename",
-          "when": "view == tabManagerExplorer && viewItem =~ /^(file|directory)$/",
-          "group": "4_modify@1"
-        },
-        {
-          "command": "tabManager.explorer.delete",
-          "when": "view == tabManagerExplorer && viewItem =~ /^(file|directory)$/",
-          "group": "4_modify@2"
+          "command": "tabManager.explorer.findInFolder",
+          "when": "view == tabManagerExplorer && viewItem =~ /^(directory|workspaceFolder)$/",
+          "group": "2_workspace@3"
         },
         {
           "command": "tabManager.explorer.newFile",
           "when": "view == tabManagerExplorer && viewItem =~ /^(directory|workspaceFolder)$/",
-          "group": "5_new@1"
+          "group": "3_new@1"
         },
         {
           "command": "tabManager.explorer.newFolder",
           "when": "view == tabManagerExplorer && viewItem =~ /^(directory|workspaceFolder)$/",
-          "group": "5_new@2"
+          "group": "3_new@2"
+        },
+        {
+          "command": "tabManager.explorer.cut",
+          "when": "view == tabManagerExplorer && viewItem =~ /^(file|directory)$/",
+          "group": "5_cutcopypaste@1"
+        },
+        {
+          "command": "tabManager.explorer.copy",
+          "when": "view == tabManagerExplorer && viewItem =~ /^(file|directory|workspaceFolder)$/",
+          "group": "5_cutcopypaste@2"
+        },
+        {
+          "command": "tabManager.explorer.paste",
+          "when": "view == tabManagerExplorer && viewItem =~ /^(directory|workspaceFolder)$/ && tabManager.explorerHasClipboard",
+          "group": "5_cutcopypaste@3"
+        },
+        {
+          "command": "tabManager.explorer.copyPath",
+          "when": "view == tabManagerExplorer && viewItem =~ /^(file|directory|workspaceFolder)$/",
+          "group": "6_path@1"
+        },
+        {
+          "command": "tabManager.explorer.copyRelativePath",
+          "when": "view == tabManagerExplorer && viewItem =~ /^(file|directory|workspaceFolder)$/",
+          "group": "6_path@2"
+        },
+        {
+          "command": "tabManager.explorer.selectForCompare",
+          "when": "view == tabManagerExplorer && viewItem == file",
+          "group": "7_compare@1"
+        },
+        {
+          "command": "tabManager.explorer.compareWithSelected",
+          "when": "view == tabManagerExplorer && viewItem == file && tabManager.explorerHasCompareLeft",
+          "group": "7_compare@2"
+        },
+        {
+          "command": "tabManager.explorer.compareSelected",
+          "when": "view == tabManagerExplorer && viewItem == file && listMultiSelection",
+          "group": "7_compare@3"
+        },
+        {
+          "command": "tabManager.explorer.rename",
+          "when": "view == tabManagerExplorer && viewItem =~ /^(file|directory)$/",
+          "group": "8_modify@1"
+        },
+        {
+          "command": "tabManager.explorer.delete",
+          "when": "view == tabManagerExplorer && viewItem =~ /^(file|directory)$/",
+          "group": "8_modify@2"
         }
       ]
-    }
+    },
+    "keybindings": [
+      {
+        "command": "tabManager.explorer.rename",
+        "key": "f2",
+        "when": "focusedView == tabManagerExplorer"
+      },
+      {
+        "command": "tabManager.explorer.delete",
+        "key": "delete",
+        "mac": "cmd+backspace",
+        "when": "focusedView == tabManagerExplorer"
+      },
+      {
+        "command": "tabManager.explorer.cut",
+        "key": "ctrl+x",
+        "mac": "cmd+x",
+        "when": "focusedView == tabManagerExplorer"
+      },
+      {
+        "command": "tabManager.explorer.copy",
+        "key": "ctrl+c",
+        "mac": "cmd+c",
+        "when": "focusedView == tabManagerExplorer"
+      },
+      {
+        "command": "tabManager.explorer.paste",
+        "key": "ctrl+v",
+        "mac": "cmd+v",
+        "when": "focusedView == tabManagerExplorer && tabManager.explorerHasClipboard"
+      },
+      {
+        "command": "tabManager.explorer.copyPath",
+        "key": "ctrl+alt+c",
+        "mac": "alt+cmd+c",
+        "when": "focusedView == tabManagerExplorer"
+      },
+      {
+        "command": "tabManager.explorer.copyRelativePath",
+        "key": "ctrl+k ctrl+shift+c",
+        "mac": "cmd+k cmd+shift+c",
+        "when": "focusedView == tabManagerExplorer"
+      },
+      {
+        "command": "tabManager.explorer.openToSide",
+        "key": "ctrl+enter",
+        "mac": "cmd+enter",
+        "when": "focusedView == tabManagerExplorer"
+      },
+      {
+        "command": "tabManager.explorer.findInFolder",
+        "key": "ctrl+shift+f",
+        "mac": "cmd+shift+f",
+        "when": "focusedView == tabManagerExplorer && !inputFocus"
+      }
+    ]
   },
   "scripts": {
     "vscode:prepublish": "npm run package",
