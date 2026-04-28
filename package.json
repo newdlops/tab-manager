@@ -2,7 +2,7 @@
   "name": "tab-manager",
   "displayName": "Tab Manager",
   "description": "Group, filter, and sort open tabs and workspace files from the activity bar and Explorer.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "newdlops",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -197,6 +197,12 @@
         "category": "Extended Explorer"
       },
       {
+        "command": "tabManager.explorer.revealActive",
+        "title": "Reveal Active File in Explorer",
+        "icon": "$(target)",
+        "category": "Extended Explorer"
+      },
+      {
         "command": "tabManager.explorer.rename",
         "title": "Rename...",
         "category": "Extended Explorer"
@@ -295,9 +301,14 @@
           "group": "navigation@2"
         },
         {
-          "command": "tabManager.explorer.refresh",
+          "command": "tabManager.explorer.revealActive",
           "when": "view == tabManagerExplorer",
           "group": "navigation@3"
+        },
+        {
+          "command": "tabManager.explorer.refresh",
+          "when": "view == tabManagerExplorer",
+          "group": "navigation@4"
         },
         {
           "command": "tabManager.filter.modified",

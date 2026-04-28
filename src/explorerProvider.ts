@@ -42,6 +42,7 @@ export class FileNode extends vscode.TreeItem {
   constructor(public readonly uri: vscode.Uri, public readonly isDeleted = false) {
     super(baseName(uri), vscode.TreeItemCollapsibleState.None);
     this.resourceUri = uri;
+    this.id = `file:${isDeleted ? 'deleted:' : ''}${uri.toString()}`;
     if (isDeleted) {
       this.description = 'deleted';
       this.contextValue = 'file.deleted';
@@ -209,6 +210,31 @@ export class ExplorerProvider
     return element;
   }
 
+  getParent(element: FileTreeNode): FileTreeNode | undefined {
+    if (element instanceof WorkspaceFolderNode) return undefined;
+    if (element instanceof PendingNode) return undefined;
+    const uri = element instanceof DirectoryNode ? element.uri : element.uri;
+    const parent = parentUri(uri);
+    if (parent.toString() === uri.toString()) return undefined;
+
+    const folders = vscode.workspace.workspaceFolders ?? [];
+    const matchingFolder = folders.find((f) => f.uri.toString() === parent.toString());
+    if (matchingFolder) {
+      return folders.length === 1 ? undefined : new WorkspaceFolderNode(matchingFolder);
+    }
+    return new DirectoryNode(parent);
+  }
+
+  nodeForUri(uri: vscode.Uri): FileTreeNode | undefined {
+    const folders = vscode.workspace.workspaceFolders ?? [];
+    const containing = folders.find((f) => isInsideFolder(uri, f.uri));
+    if (!containing) return undefined;
+    if (uri.toString() === containing.uri.toString()) {
+      return folders.length === 1 ? undefined : new WorkspaceFolderNode(containing);
+    }
+    return new FileNode(uri);
+  }
+
   async getChildren(element?: FileTreeNode): Promise<FileTreeNode[]> {
     const mode = this.store.getFilterMode();
 
@@ -313,6 +339,12 @@ async function resolveDropDestination(
   const folders = vscode.workspace.workspaceFolders ?? [];
   if (folders.length === 1) return folders[0].uri;
   return undefined;
+}
+
+function isInsideFolder(uri: vscode.Uri, folder: vscode.Uri): boolean {
+  const u = uri.toString();
+  const f = folder.toString();
+  return u === f || u.startsWith(f + '/');
 }
 
 function isSameOrAncestor(src: vscode.Uri, candidate: vscode.Uri): boolean {

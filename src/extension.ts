@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { GroupStore, type FilterMode } from './groupStore';
-import { openTab } from './tabUtils';
+import { openTab, resourceUriFor } from './tabUtils';
 import { GroupNode, TabNode, TabTreeDataProvider } from './tabProvider';
 import { FilterSource } from './filterSource';
 import { ExplorerProvider } from './explorerProvider';
@@ -87,6 +87,24 @@ export function activate(context: vscode.ExtensionContext) {
     }),
 
     vscode.commands.registerCommand('tabManager.openTab', (node: TabNode) => openTab(node.tab)),
+
+    vscode.commands.registerCommand('tabManager.explorer.revealActive', async () => {
+      const uri = activeResourceUri();
+      if (!uri) {
+        vscode.window.showInformationMessage('No active file to reveal.');
+        return;
+      }
+      const node = explorerProvider.nodeForUri(uri);
+      if (!node) {
+        vscode.window.showWarningMessage('Active file is not inside an open workspace folder.');
+        return;
+      }
+      try {
+        await filesView.reveal(node, { select: true, focus: true, expand: true });
+      } catch (e) {
+        vscode.window.showErrorMessage(`Failed to reveal: ${String(e)}`);
+      }
+    }),
 
     vscode.commands.registerCommand('tabManager.closeTab', async (node: TabNode) => {
       const targets = selectedTabNodes(node);
@@ -204,6 +222,15 @@ function capitalize(s: FilterMode): string {
     default:
       return s.charAt(0).toUpperCase() + s.slice(1);
   }
+}
+
+function activeResourceUri(): vscode.Uri | undefined {
+  const tab = vscode.window.tabGroups.activeTabGroup.activeTab;
+  if (tab) {
+    const uri = resourceUriFor(tab);
+    if (uri) return uri;
+  }
+  return vscode.window.activeTextEditor?.document.uri;
 }
 
 export function deactivate(): void {}
