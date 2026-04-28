@@ -13,6 +13,7 @@ import {
 import type { FilterSource } from './filterSource';
 
 type AnyNode = FileTreeNode;
+type AnyItem = vscode.TreeItem;
 
 interface ClipboardState {
   mode: 'cut' | 'copy';
@@ -28,13 +29,24 @@ export function registerExplorerCommands(
   filesView: vscode.TreeView<FileTreeNode>,
   filterSource: FilterSource,
 ): void {
+  const selectedItems = (
+    fallback?: AnyItem,
+    items?: readonly AnyItem[],
+  ): AnyItem[] => {
+    if (items && items.length > 0) return [...items];
+    if (fallback) return [fallback];
+    return [...filesView.selection];
+  };
   const selectedNodes = (fallback?: AnyNode): AnyNode[] => {
     const sel = filesView.selection;
     if (sel.length > 0) return [...sel];
     return fallback ? [fallback] : [];
   };
-  const selectedUris = (fallback?: AnyNode): vscode.Uri[] => {
-    return selectedNodes(fallback)
+  const selectedUris = (
+    fallback?: AnyItem,
+    items?: readonly AnyItem[],
+  ): vscode.Uri[] => {
+    return selectedItems(fallback, items)
       .map(uriOf)
       .filter((u): u is vscode.Uri => u !== undefined);
   };
@@ -72,10 +84,10 @@ export function registerExplorerCommands(
 
     vscode.commands.registerCommand(
       'tabManager.explorer.rename',
-      async (node?: FileNode | DirectoryNode) => {
-        const target = node ?? selectedNodes()[0];
-        if (!(target instanceof FileNode || target instanceof DirectoryNode)) return;
-        const oldUri = target.uri;
+      async (node?: AnyItem, items?: AnyItem[]) => {
+        const target = node ?? selectedItems(undefined, items)[0];
+        const oldUri = uriOf(target);
+        if (!oldUri || !isModifiable(oldUri)) return;
         const current = baseName(oldUri);
         const name = await vscode.window.showInputBox({
           prompt: 'New name',
@@ -96,8 +108,8 @@ export function registerExplorerCommands(
       },
     ),
 
-    vscode.commands.registerCommand('tabManager.explorer.delete', async (node?: AnyNode) => {
-      const targets = selectedUris(node).filter((u) => isModifiable(u));
+    vscode.commands.registerCommand('tabManager.explorer.delete', async (node?: AnyItem, items?: AnyItem[]) => {
+      const targets = selectedUris(node, items).filter((u) => isModifiable(u));
       if (targets.length === 0) return;
       const detail =
         targets.length === 1
@@ -120,16 +132,16 @@ export function registerExplorerCommands(
       }
     }),
 
-    vscode.commands.registerCommand('tabManager.explorer.copyPath', async (node?: AnyNode) => {
-      const uris = selectedUris(node);
+    vscode.commands.registerCommand('tabManager.explorer.copyPath', async (node?: AnyItem, items?: AnyItem[]) => {
+      const uris = selectedUris(node, items);
       if (uris.length === 0) return;
       await vscode.env.clipboard.writeText(uris.map((u) => u.fsPath).join('\n'));
     }),
 
     vscode.commands.registerCommand(
       'tabManager.explorer.copyRelativePath',
-      async (node?: AnyNode) => {
-        const uris = selectedUris(node);
+      async (node?: AnyItem, items?: AnyItem[]) => {
+        const uris = selectedUris(node, items);
         if (uris.length === 0) return;
         await vscode.env.clipboard.writeText(
           uris.map((u) => vscode.workspace.asRelativePath(u, false)).join('\n'),
@@ -137,8 +149,8 @@ export function registerExplorerCommands(
       },
     ),
 
-    vscode.commands.registerCommand('tabManager.explorer.revealInOS', async (node?: AnyNode) => {
-      const uri = selectedUris(node)[0];
+    vscode.commands.registerCommand('tabManager.explorer.revealInOS', async (node?: AnyItem, items?: AnyItem[]) => {
+      const uri = selectedUris(node, items)[0];
       if (!uri) return;
       await vscode.commands.executeCommand('revealFileInOS', uri);
     }),
@@ -156,8 +168,8 @@ export function registerExplorerCommands(
       },
     ),
 
-    vscode.commands.registerCommand('tabManager.explorer.openToSide', async (node?: AnyNode) => {
-      const uris = selectedUris(node).filter(
+    vscode.commands.registerCommand('tabManager.explorer.openToSide', async (node?: AnyItem, items?: AnyItem[]) => {
+      const uris = selectedUris(node, items).filter(
         (u, i, arr) => arr.findIndex((v) => v.toString() === u.toString()) === i,
       );
       for (const uri of uris) {
@@ -169,8 +181,8 @@ export function registerExplorerCommands(
       }
     }),
 
-    vscode.commands.registerCommand('tabManager.explorer.openWith', async (node?: AnyNode) => {
-      const uri = selectedUris(node)[0];
+    vscode.commands.registerCommand('tabManager.explorer.openWith', async (node?: AnyItem, items?: AnyItem[]) => {
+      const uri = selectedUris(node, items)[0];
       if (!uri) return;
       await vscode.commands.executeCommand('explorer.openWith', uri);
     }),
@@ -188,15 +200,15 @@ export function registerExplorerCommands(
       },
     ),
 
-    vscode.commands.registerCommand('tabManager.explorer.cut', async (node?: AnyNode) => {
-      const uris = selectedUris(node).filter(isModifiable);
+    vscode.commands.registerCommand('tabManager.explorer.cut', async (node?: AnyItem, items?: AnyItem[]) => {
+      const uris = selectedUris(node, items).filter(isModifiable);
       if (uris.length === 0) return;
       clipboard = { mode: 'cut', uris };
       updateClipboardContext();
     }),
 
-    vscode.commands.registerCommand('tabManager.explorer.copy', async (node?: AnyNode) => {
-      const uris = selectedUris(node);
+    vscode.commands.registerCommand('tabManager.explorer.copy', async (node?: AnyItem, items?: AnyItem[]) => {
+      const uris = selectedUris(node, items);
       if (uris.length === 0) return;
       clipboard = { mode: 'copy', uris };
       updateClipboardContext();
@@ -247,8 +259,8 @@ export function registerExplorerCommands(
 
     vscode.commands.registerCommand(
       'tabManager.explorer.selectForCompare',
-      async (node?: AnyNode) => {
-        const uri = selectedUris(node)[0];
+      async (node?: AnyItem, items?: AnyItem[]) => {
+        const uri = selectedUris(node, items)[0];
         if (!uri) return;
         compareLeft = uri;
         updateCompareContext();
@@ -257,8 +269,8 @@ export function registerExplorerCommands(
 
     vscode.commands.registerCommand(
       'tabManager.explorer.compareWithSelected',
-      async (node?: AnyNode) => {
-        const right = selectedUris(node)[0];
+      async (node?: AnyItem, items?: AnyItem[]) => {
+        const right = selectedUris(node, items)[0];
         if (!right || !compareLeft) return;
         await vscode.commands.executeCommand(
           'vscode.diff',
@@ -269,8 +281,10 @@ export function registerExplorerCommands(
       },
     ),
 
-    vscode.commands.registerCommand('tabManager.explorer.compareSelected', async () => {
-      const uris = selectedUris().filter((_, i, arr) => i === arr.findIndex((v) => v.toString() === arr[i].toString()));
+    vscode.commands.registerCommand('tabManager.explorer.compareSelected', async (node?: AnyItem, items?: AnyItem[]) => {
+      const uris = selectedUris(node, items).filter(
+        (u, i, arr) => arr.findIndex((v) => v.toString() === u.toString()) === i,
+      );
       if (uris.length !== 2) {
         vscode.window.showInformationMessage('Select exactly two files to compare.');
         return;
@@ -361,11 +375,12 @@ function validateName(value: string): string | undefined {
   return undefined;
 }
 
-function uriOf(node: AnyNode): vscode.Uri | undefined {
+function uriOf(node: AnyItem | undefined): vscode.Uri | undefined {
+  if (!node) return undefined;
   if (node instanceof WorkspaceFolderNode) return node.folder.uri;
   if (node instanceof DirectoryNode) return node.uri;
   if (node instanceof FileNode) return node.uri;
-  return undefined;
+  return node.resourceUri;
 }
 
 function isModifiable(uri: vscode.Uri): boolean {

@@ -38,9 +38,11 @@ export class TabNode extends vscode.TreeItem {
   constructor(public readonly tab: vscode.Tab, public readonly inGroup: boolean) {
     super(tab.label, vscode.TreeItemCollapsibleState.None);
     this.key = tabKey(tab);
-    this.contextValue = inGroup ? 'tab.grouped' : 'tab';
 
     const uri = resourceUriFor(tab);
+    const base = uri ? 'tab.file' : 'tab';
+    this.contextValue = inGroup ? `${base}.grouped` : base;
+
     const descParts: string[] = [];
     if (uri) {
       this.resourceUri = uri;
