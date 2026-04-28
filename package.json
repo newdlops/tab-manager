@@ -173,6 +173,12 @@
         "category": "Tab Manager"
       },
       {
+        "command": "tabManager.filter.unsaved",
+        "title": "Show Unsaved Only",
+        "icon": "$(circle-filled)",
+        "category": "Tab Manager"
+      },
+      {
         "command": "tabManager.explorer.newFile",
         "title": "New File...",
         "icon": "$(new-file)",
@@ -340,9 +346,21 @@
           "group": "3_filter@3"
         },
         {
+          "command": "tabManager.filter.unsaved",
+          "title": "✓ Show Unsaved Only",
+          "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.filterMode == 'unsaved'",
+          "group": "3_filter@4"
+        },
+        {
+          "command": "tabManager.filter.unsaved",
+          "title": "Show Unsaved Only",
+          "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.filterMode != 'unsaved'",
+          "group": "3_filter@4"
+        },
+        {
           "command": "tabManager.filter.clear",
           "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.filterMode != 'none'",
-          "group": "3_filter@4"
+          "group": "3_filter@5"
         },
         {
           "command": "tabManager.sort.nameAsc",

@@ -5,6 +5,7 @@ import { GroupNode, TabNode, TabTreeDataProvider } from './tabProvider';
 import { FilterSource } from './filterSource';
 import { ExplorerProvider } from './explorerProvider';
 import { registerExplorerCommands } from './explorerCommands';
+import { UnsavedDecorationProvider } from './unsavedDecorations';
 import { debounce } from './util';
 
 export function activate(context: vscode.ExtensionContext) {
@@ -12,6 +13,7 @@ export function activate(context: vscode.ExtensionContext) {
   const filterSource = new FilterSource();
   const provider = new TabTreeDataProvider(store, filterSource);
   const explorerProvider = new ExplorerProvider(store, filterSource);
+  const unsavedDecorations = new UnsavedDecorationProvider(filterSource);
 
   const view = vscode.window.createTreeView('tabManagerView', {
     treeDataProvider: provider,
@@ -74,6 +76,8 @@ export function activate(context: vscode.ExtensionContext) {
     view,
     filesView,
     filterSource,
+    unsavedDecorations,
+    vscode.window.registerFileDecorationProvider(unsavedDecorations),
     fsWatcher,
     vscode.window.tabGroups.onDidChangeTabs(() => scheduleTabRefresh()),
     vscode.window.tabGroups.onDidChangeTabGroups(() => scheduleTabRefresh()),
@@ -184,6 +188,9 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('tabManager.filter.tabsOnly', () =>
       store.toggleFilterMode('tabsOnly'),
     ),
+    vscode.commands.registerCommand('tabManager.filter.unsaved', () =>
+      store.toggleFilterMode('unsaved'),
+    ),
     vscode.commands.registerCommand('tabManager.filter.clear', () => store.setFilterMode('none')),
   );
 }
@@ -192,6 +199,8 @@ function capitalize(s: FilterMode): string {
   switch (s) {
     case 'tabsOnly':
       return 'Tabs Only';
+    case 'unsaved':
+      return 'Unsaved';
     default:
       return s.charAt(0).toUpperCase() + s.slice(1);
   }

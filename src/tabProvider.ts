@@ -54,6 +54,7 @@ export class TabNode extends vscode.TreeItem {
       this.tooltip = tab.label;
     }
     if (tab.isPreview) descParts.push('preview');
+    if (tab.isDirty) descParts.push('unsaved');
     this.description = descParts.join(' · ');
 
     this.command = {

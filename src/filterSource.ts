@@ -60,6 +60,8 @@ export class FilterSource implements vscode.Disposable {
   private readonly uriCache = new Map<FilterMode, vscode.Uri[]>();
   private readonly matchSetCache = new Map<FilterMode, Set<string>>();
 
+  private dirtySetCache?: Set<string>;
+
   private readonly fireDebounced = debounce(() => {
     this.invalidateCaches();
     this._onDidChange.fire();
@@ -92,6 +94,33 @@ export class FilterSource implements vscode.Disposable {
   private invalidateCaches(): void {
     this.uriCache.clear();
     this.matchSetCache.clear();
+    this.dirtySetCache = undefined;
+  }
+
+  isDirty(uri: vscode.Uri): boolean {
+    if (!this.dirtySetCache) {
+      const set = new Set<string>();
+      for (const uri of this.computeDirtyUris()) set.add(uri.toString());
+      this.dirtySetCache = set;
+    }
+    return this.dirtySetCache.has(uri.toString());
+  }
+
+  private computeDirtyUris(): vscode.Uri[] {
+    const seen = new Set<string>();
+    const uris: vscode.Uri[] = [];
+    for (const group of vscode.window.tabGroups.all) {
+      for (const tab of group.tabs) {
+        if (!tab.isDirty) continue;
+        const uri = resourceUriFor(tab);
+        if (!uri) continue;
+        const key = uri.toString();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        uris.push(uri);
+      }
+    }
+    return uris;
   }
 
   private async bootstrapGit(): Promise<void> {
@@ -172,6 +201,9 @@ export class FilterSource implements vscode.Disposable {
         }
       }
       return uris;
+    }
+    if (mode === 'unsaved') {
+      return this.computeDirtyUris();
     }
     const wanted = gitStatusFor(mode);
     if (wanted === undefined || !this.git) return [];

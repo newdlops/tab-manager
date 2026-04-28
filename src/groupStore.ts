@@ -7,7 +7,14 @@ export interface SortState {
   type: boolean;
 }
 
-export type FilterMode = 'none' | 'modified' | 'untracked' | 'deleted' | 'errors' | 'tabsOnly';
+export type FilterMode =
+  | 'none'
+  | 'modified'
+  | 'untracked'
+  | 'deleted'
+  | 'errors'
+  | 'tabsOnly'
+  | 'unsaved';
 
 export interface UserGroup {
   id: string;
@@ -27,6 +34,7 @@ const FILTER_MODES: readonly FilterMode[] = [
   'deleted',
   'errors',
   'tabsOnly',
+  'unsaved',
 ];
 
 export class GroupStore {
