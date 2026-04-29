@@ -35,7 +35,11 @@ export class UngroupedHeaderNode extends vscode.TreeItem {
 export class TabNode extends vscode.TreeItem {
   public readonly key: string;
 
-  constructor(public readonly tab: vscode.Tab, public readonly inGroup: boolean) {
+  constructor(
+    public readonly tab: vscode.Tab,
+    public readonly inGroup: boolean,
+    isReadOnly = false,
+  ) {
     super(tab.label, vscode.TreeItemCollapsibleState.None);
     this.key = tabKey(tab);
 
@@ -57,6 +61,7 @@ export class TabNode extends vscode.TreeItem {
     }
     if (tab.isPreview) descParts.push('preview');
     if (tab.isDirty) descParts.push('unsaved');
+    if (isReadOnly) descParts.push('read-only');
     this.description = descParts.join(' · ');
 
     this.command = {
@@ -115,6 +120,11 @@ export class TabTreeDataProvider implements vscode.TreeDataProvider<TabTreeNode>
     return element;
   }
 
+  private isTabReadOnly = (tab: vscode.Tab): boolean => {
+    const uri = resourceUriFor(tab);
+    return uri ? this.filter.isReadOnly(uri) : false;
+  };
+
   getChildren(element?: TabTreeNode): TabTreeNode[] {
     const allTabs = this.filterTabs(vscode.window.tabGroups.all.flatMap((g) => g.tabs));
     const sortMode = this.store.getSortState();
@@ -122,7 +132,9 @@ export class TabTreeDataProvider implements vscode.TreeDataProvider<TabTreeNode>
 
     if (!element) {
       if (groups.length === 0) {
-        return sortTabs(allTabs, sortMode).map((t) => new TabNode(t, false));
+        return sortTabs(allTabs, sortMode, this.isTabReadOnly).map(
+          (t) => new TabNode(t, false, this.isTabReadOnly(t)),
+        );
       }
       const nodes: TabTreeNode[] = groups.map((g) => {
         const tabsInGroup = allTabs.filter((t) => g.tabKeys.includes(tabKey(t)));
@@ -137,12 +149,16 @@ export class TabTreeDataProvider implements vscode.TreeDataProvider<TabTreeNode>
 
     if (element instanceof GroupNode) {
       const tabs = allTabs.filter((t) => element.group.tabKeys.includes(tabKey(t)));
-      return sortTabs(tabs, sortMode).map((t) => new TabNode(t, true));
+      return sortTabs(tabs, sortMode, this.isTabReadOnly).map(
+        (t) => new TabNode(t, true, this.isTabReadOnly(t)),
+      );
     }
 
     if (element instanceof UngroupedHeaderNode) {
       const tabs = allTabs.filter((t) => !this.store.findGroupForTab(tabKey(t)));
-      return sortTabs(tabs, sortMode).map((t) => new TabNode(t, false));
+      return sortTabs(tabs, sortMode, this.isTabReadOnly).map(
+        (t) => new TabNode(t, false, this.isTabReadOnly(t)),
+      );
     }
 
     return [];

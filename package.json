@@ -2,7 +2,7 @@
   "name": "tab-manager",
   "displayName": "Tab Manager",
   "description": "Group, filter, and sort open tabs and workspace files from the activity bar and Explorer.",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "publisher": "newdlops",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -176,6 +176,17 @@
         "command": "tabManager.filter.unsaved",
         "title": "Show Unsaved Only",
         "icon": "$(circle-filled)",
+        "category": "Tab Manager"
+      },
+      {
+        "command": "tabManager.filter.readOnly",
+        "title": "Show Read-only Only",
+        "icon": "$(lock)",
+        "category": "Tab Manager"
+      },
+      {
+        "command": "tabManager.sort.toggleReadOnly",
+        "title": "Sort by Read-only",
         "category": "Tab Manager"
       },
       {
@@ -369,9 +380,21 @@
           "group": "3_filter@4"
         },
         {
+          "command": "tabManager.filter.readOnly",
+          "title": "✓ Show Read-only Only",
+          "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.filterMode == 'readOnly'",
+          "group": "3_filter@5"
+        },
+        {
+          "command": "tabManager.filter.readOnly",
+          "title": "Show Read-only Only",
+          "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.filterMode != 'readOnly'",
+          "group": "3_filter@5"
+        },
+        {
           "command": "tabManager.filter.clear",
           "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.filterMode != 'none'",
-          "group": "3_filter@5"
+          "group": "3_filter@6"
         },
         {
           "command": "tabManager.sort.nameAsc",
@@ -420,6 +443,18 @@
           "title": "Sort by Type",
           "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && !tabManager.sortType",
           "group": "2_sortType@1"
+        },
+        {
+          "command": "tabManager.sort.toggleReadOnly",
+          "title": "✓ Sort by Read-only",
+          "when": "view == tabManagerView && tabManager.sortReadOnly",
+          "group": "2_sortReadOnly@1"
+        },
+        {
+          "command": "tabManager.sort.toggleReadOnly",
+          "title": "Sort by Read-only",
+          "when": "view == tabManagerView && !tabManager.sortReadOnly",
+          "group": "2_sortReadOnly@1"
         }
       ],
       "view/item/context": [

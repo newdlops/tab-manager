@@ -53,6 +53,7 @@ export function activate(context: vscode.ExtensionContext) {
     const s = store.getSortState();
     vscode.commands.executeCommand('setContext', 'tabManager.sortName', s.name);
     vscode.commands.executeCommand('setContext', 'tabManager.sortType', s.type);
+    vscode.commands.executeCommand('setContext', 'tabManager.sortReadOnly', s.readOnly);
   };
   const syncFilterState = () => {
     const mode = store.getFilterMode();
@@ -190,6 +191,9 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('tabManager.sort.nameDesc', () => store.setNameSort('desc')),
     vscode.commands.registerCommand('tabManager.sort.nameNone', () => store.setNameSort('none')),
     vscode.commands.registerCommand('tabManager.sort.toggleType', () => store.toggleTypeSort()),
+    vscode.commands.registerCommand('tabManager.sort.toggleReadOnly', () =>
+      store.toggleReadOnlySort(),
+    ),
 
     vscode.commands.registerCommand('tabManager.filter.modified', () =>
       store.toggleFilterMode('modified'),
@@ -209,6 +213,9 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('tabManager.filter.unsaved', () =>
       store.toggleFilterMode('unsaved'),
     ),
+    vscode.commands.registerCommand('tabManager.filter.readOnly', () =>
+      store.toggleFilterMode('readOnly'),
+    ),
     vscode.commands.registerCommand('tabManager.filter.clear', () => store.setFilterMode('none')),
   );
 }
@@ -219,6 +226,8 @@ function capitalize(s: FilterMode): string {
       return 'Tabs Only';
     case 'unsaved':
       return 'Unsaved';
+    case 'readOnly':
+      return 'Read-only';
     default:
       return s.charAt(0).toUpperCase() + s.slice(1);
   }

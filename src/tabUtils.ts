@@ -101,8 +101,13 @@ function computeTabTypeKey(tab: vscode.Tab): string {
   return 'other';
 }
 
-export function sortTabs(tabs: vscode.Tab[], state: SortState): vscode.Tab[] {
-  if (state.name === 'none' && !state.type) return tabs;
+export function sortTabs(
+  tabs: vscode.Tab[],
+  state: SortState,
+  isReadOnly?: (tab: vscode.Tab) => boolean,
+): vscode.Tab[] {
+  const useReadOnly = state.readOnly && !!isReadOnly;
+  if (state.name === 'none' && !state.type && !useReadOnly) return tabs;
 
   const useType = state.type;
   const nameOrder: 0 | 1 | -1 = state.name === 'asc' ? 1 : state.name === 'desc' ? -1 : 0;
@@ -110,10 +115,12 @@ export function sortTabs(tabs: vscode.Tab[], state: SortState): vscode.Tab[] {
   const decorated = tabs.map((tab) => ({
     tab,
     typeKey: useType ? tabTypeKey(tab) : '',
+    readOnly: useReadOnly && isReadOnly!(tab) ? 0 : 1,
     label: tab.label,
   }));
 
   decorated.sort((a, b) => {
+    if (useReadOnly && a.readOnly !== b.readOnly) return a.readOnly - b.readOnly;
     if (useType) {
       if (a.typeKey < b.typeKey) return -1;
       if (a.typeKey > b.typeKey) return 1;

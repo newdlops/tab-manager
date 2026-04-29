@@ -49,6 +49,15 @@ interface GitExtension {
   getAPI(version: 1): GitAPI;
 }
 
+const READONLY_SCHEMES: ReadonlySet<string> = new Set([
+  'git',
+  'gitfs',
+  'output',
+  'walkThroughSnippet',
+  'vscode-help',
+  'vscode-scm',
+]);
+
 export class FilterSource implements vscode.Disposable {
   private readonly _onDidChange = new vscode.EventEmitter<void>();
   readonly onDidChange = this._onDidChange.event;
@@ -61,20 +70,33 @@ export class FilterSource implements vscode.Disposable {
   private readonly matchSetCache = new Map<FilterMode, Set<string>>();
 
   private dirtySetCache?: Set<string>;
+  private readonly readOnlyCache = new Map<string, boolean>();
+  private readonlyPopulationToken = 0;
 
   private readonly fireDebounced = debounce(() => {
     this.invalidateCaches();
     this._onDidChange.fire();
   }, 50);
 
+  private readonly schedulePopulateReadOnly = debounce(() => {
+    void this.populateReadOnly();
+  }, 80);
+
   constructor() {
     this.disposables.push(
       this._onDidChange,
       vscode.languages.onDidChangeDiagnostics(() => this.fireDebounced()),
-      vscode.window.tabGroups.onDidChangeTabs(() => this.fireDebounced()),
-      vscode.window.tabGroups.onDidChangeTabGroups(() => this.fireDebounced()),
+      vscode.window.tabGroups.onDidChangeTabs(() => {
+        this.fireDebounced();
+        this.schedulePopulateReadOnly();
+      }),
+      vscode.window.tabGroups.onDidChangeTabGroups(() => {
+        this.fireDebounced();
+        this.schedulePopulateReadOnly();
+      }),
     );
     void this.bootstrapGit();
+    this.schedulePopulateReadOnly();
   }
 
   async refresh(): Promise<void> {
@@ -87,8 +109,10 @@ export class FilterSource implements vscode.Disposable {
         ),
       );
     }
+    this.readOnlyCache.clear();
     this.invalidateCaches();
     this._onDidChange.fire();
+    this.schedulePopulateReadOnly();
   }
 
   private invalidateCaches(): void {
@@ -104,6 +128,68 @@ export class FilterSource implements vscode.Disposable {
       this.dirtySetCache = set;
     }
     return this.dirtySetCache.has(uri.toString());
+  }
+
+  isReadOnly(uri: vscode.Uri): boolean {
+    if (READONLY_SCHEMES.has(uri.scheme)) return true;
+    return this.readOnlyCache.get(uri.toString()) ?? false;
+  }
+
+  private async populateReadOnly(): Promise<void> {
+    const token = ++this.readonlyPopulationToken;
+    const live = new Set<string>();
+    const toStat: vscode.Uri[] = [];
+    for (const group of vscode.window.tabGroups.all) {
+      for (const tab of group.tabs) {
+        const uri = resourceUriFor(tab);
+        if (!uri) continue;
+        const key = uri.toString();
+        if (live.has(key)) continue;
+        live.add(key);
+        if (READONLY_SCHEMES.has(uri.scheme)) continue;
+        if (this.readOnlyCache.has(key)) continue;
+        toStat.push(uri);
+      }
+    }
+
+    let changed = false;
+    for (const key of [...this.readOnlyCache.keys()]) {
+      if (!live.has(key)) {
+        this.readOnlyCache.delete(key);
+        changed = true;
+      }
+    }
+
+    if (toStat.length > 0) {
+      await Promise.all(
+        toStat.map(async (uri) => {
+          const ro = await this.statReadOnly(uri);
+          if (token !== this.readonlyPopulationToken) return;
+          const prev = this.readOnlyCache.get(uri.toString());
+          if (prev !== ro) {
+            this.readOnlyCache.set(uri.toString(), ro);
+            changed = true;
+          }
+        }),
+      );
+    }
+
+    if (token !== this.readonlyPopulationToken) return;
+    if (changed) {
+      this.uriCache.delete('readOnly');
+      this.matchSetCache.delete('readOnly');
+      this._onDidChange.fire();
+    }
+  }
+
+  private async statReadOnly(uri: vscode.Uri): Promise<boolean> {
+    if (uri.scheme !== 'file') return false;
+    try {
+      const stat = await vscode.workspace.fs.stat(uri);
+      return ((stat.permissions ?? 0) & vscode.FilePermission.Readonly) !== 0;
+    } catch {
+      return false;
+    }
   }
 
   private computeDirtyUris(): vscode.Uri[] {
@@ -204,6 +290,21 @@ export class FilterSource implements vscode.Disposable {
     }
     if (mode === 'unsaved') {
       return this.computeDirtyUris();
+    }
+    if (mode === 'readOnly') {
+      const seen = new Set<string>();
+      const uris: vscode.Uri[] = [];
+      for (const group of vscode.window.tabGroups.all) {
+        for (const tab of group.tabs) {
+          const uri = resourceUriFor(tab);
+          if (!uri) continue;
+          const key = uri.toString();
+          if (seen.has(key)) continue;
+          seen.add(key);
+          if (this.isReadOnly(uri)) uris.push(uri);
+        }
+      }
+      return uris;
     }
     const wanted = gitStatusFor(mode);
     if (wanted === undefined || !this.git) return [];

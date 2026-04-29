@@ -5,6 +5,7 @@ export type NameSort = 'none' | 'asc' | 'desc';
 export interface SortState {
   name: NameSort;
   type: boolean;
+  readOnly: boolean;
 }
 
 export type FilterMode =
@@ -14,7 +15,8 @@ export type FilterMode =
   | 'deleted'
   | 'errors'
   | 'tabsOnly'
-  | 'unsaved';
+  | 'unsaved'
+  | 'readOnly';
 
 export interface UserGroup {
   id: string;
@@ -26,7 +28,7 @@ const GROUPS_KEY = 'tabManager.groups';
 const SORT_KEY = 'tabManager.sortState';
 const FILTER_KEY = 'tabManager.filterMode';
 
-const DEFAULT_SORT: SortState = { name: 'none', type: false };
+const DEFAULT_SORT: SortState = { name: 'none', type: false, readOnly: false };
 const FILTER_MODES: readonly FilterMode[] = [
   'none',
   'modified',
@@ -35,6 +37,7 @@ const FILTER_MODES: readonly FilterMode[] = [
   'errors',
   'tabsOnly',
   'unsaved',
+  'readOnly',
 ];
 
 export class GroupStore {
@@ -99,7 +102,8 @@ export class GroupStore {
       'type' in raw &&
       typeof (raw as SortState).type === 'boolean'
     ) {
-      return raw as SortState;
+      const partial = raw as Partial<SortState> & { name: NameSort; type: boolean };
+      return { readOnly: false, ...partial };
     }
     return DEFAULT_SORT;
   }
@@ -113,6 +117,12 @@ export class GroupStore {
   async toggleTypeSort(): Promise<void> {
     const state = this.getSortState();
     await this.context.workspaceState.update(SORT_KEY, { ...state, type: !state.type });
+    this._onDidChange.fire();
+  }
+
+  async toggleReadOnlySort(): Promise<void> {
+    const state = this.getSortState();
+    await this.context.workspaceState.update(SORT_KEY, { ...state, readOnly: !state.readOnly });
     this._onDidChange.fire();
   }
 
