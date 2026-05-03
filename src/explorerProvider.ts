@@ -51,7 +51,7 @@ export class FileNode extends vscode.TreeItem {
       this.contextValue = 'file';
       this.tooltip = uri.fsPath;
       this.command = {
-        command: 'vscode.open',
+        command: 'tabManager.explorer.open',
         title: 'Open',
         arguments: [uri],
       };

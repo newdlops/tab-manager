@@ -17,8 +17,8 @@ A VS Code extension that brings grouping, filtering, and sorting to open tabs �
 - Lists every open tab across all editor groups (split views)
 - **Groups** — create named groups, drop tabs into them via `Add to Group...`, rename/delete freely. Tabs not in any group live under an `Ungrouped` section. With no groups defined, tabs are shown as a flat list
 - **Multi-select** — Ctrl/Cmd + click or Shift + click, then `Close Selected Tabs`
-- **Open behavior** — clicking a tab reveals it in its original editor column; preview (italic) state is preserved
-- **Tab kinds supported** — text, text diff, notebook, notebook diff, custom editor, terminal (webview tabs cannot be refocused via public VS Code API)
+- **Open behavior** — clicking a tab reveals the existing tab in its original editor group, including VS Code internal pages such as Welcome and Extensions
+- **Tab kinds supported** — text, text diff, notebook, notebook diff, custom editor, webview, terminal, and other already-open editor tabs
 
 ### Extended Explorer (Explorer sidebar)
 
@@ -85,7 +85,7 @@ All commands are discoverable in the Command Palette under `Tab Manager:` / `Ext
 - VS Code does not expose an API for inline editing in tree views. New File / New Folder uses a top-positioned input box synced live with a placeholder item in the tree — the closest approximation to the built-in Explorer's inline input
 - The built-in Explorer cannot be replaced or removed programmatically. The Extended Explorer is contributed alongside it with `"order": 0` so it tends to appear first; if it does not, drag the section header above the built-in Explorer once and VS Code remembers the order
 - The `Errors` filter reflects only diagnostics that language servers have already produced — refreshing cannot force language servers to scan unopened files
-- Webview tabs without an associated URI cannot be programmatically refocused
+- Tabs are focused by editor group/index. If a tab was closed before the tree refreshes, it may no longer be available to reveal
 - Drag-and-drop between groups or folders is not implemented
 - Cut / Copy / Paste of files is not implemented (use built-in Explorer for that)
 

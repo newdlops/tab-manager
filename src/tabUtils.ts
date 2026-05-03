@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import type { SortState } from './groupStore';
+import { formatOpenError, openResource } from './openResource';
 
 export type TabTypeCategory =
   | 'text'
@@ -15,6 +16,16 @@ const resourceUriCache = new WeakMap<vscode.Tab, vscode.Uri>();
 const tabKeyCache = new WeakMap<vscode.Tab, string>();
 const tabTypeCategoryCache = new WeakMap<vscode.Tab, TabTypeCategory>();
 const tabTypeKeyCache = new WeakMap<vscode.Tab, string>();
+const FOCUS_EDITOR_GROUP_COMMANDS = [
+  'workbench.action.focusFirstEditorGroup',
+  'workbench.action.focusSecondEditorGroup',
+  'workbench.action.focusThirdEditorGroup',
+  'workbench.action.focusFourthEditorGroup',
+  'workbench.action.focusFifthEditorGroup',
+  'workbench.action.focusSixthEditorGroup',
+  'workbench.action.focusSeventhEditorGroup',
+  'workbench.action.focusEighthEditorGroup',
+];
 
 export function resourceUriFor(tab: vscode.Tab): vscode.Uri | undefined {
   const cached = resourceUriCache.get(tab);
@@ -138,12 +149,60 @@ export function sortTabs(
 }
 
 export async function openTab(tab: vscode.Tab): Promise<void> {
+  try {
+    if (await focusExistingTab(tab)) return;
+    await reopenTabResource(tab);
+  } catch (error) {
+    vscode.window.showErrorMessage(`Failed to open "${tab.label}": ${formatOpenError(error)}`);
+  }
+}
+
+async function focusExistingTab(tab: vscode.Tab): Promise<boolean> {
+  const location = findLiveTabLocation(tab);
+  if (!location) return false;
+
+  await focusEditorGroup(location.groupIndex);
+  await vscode.commands.executeCommand('workbench.action.openEditorAtIndex', location.tabIndex);
+  return true;
+}
+
+function findLiveTabLocation(
+  tab: vscode.Tab,
+): { groupIndex: number; tabIndex: number } | undefined {
+  const groups = vscode.window.tabGroups.all;
+  for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
+    const tabIndex = groups[groupIndex].tabs.findIndex((t) => t === tab);
+    if (tabIndex !== -1) return { groupIndex, tabIndex };
+  }
+
+  const key = tabKey(tab);
+  for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
+    const tabIndex = groups[groupIndex].tabs.findIndex((t) => tabKey(t) === key);
+    if (tabIndex !== -1) return { groupIndex, tabIndex };
+  }
+  return undefined;
+}
+
+async function focusEditorGroup(groupIndex: number): Promise<void> {
+  const directCommand = FOCUS_EDITOR_GROUP_COMMANDS[groupIndex];
+  if (directCommand) {
+    await vscode.commands.executeCommand(directCommand);
+    return;
+  }
+
+  await vscode.commands.executeCommand(FOCUS_EDITOR_GROUP_COMMANDS[0]);
+  for (let i = 0; i < groupIndex; i++) {
+    await vscode.commands.executeCommand('workbench.action.focusNextGroup');
+  }
+}
+
+async function reopenTabResource(tab: vscode.Tab): Promise<void> {
   const input = tab.input;
   const viewColumn = tab.group.viewColumn;
   const preview = tab.isPreview;
 
   if (input instanceof vscode.TabInputText) {
-    await vscode.window.showTextDocument(input.uri, {
+    await openResource(input.uri, {
       viewColumn,
       preserveFocus: false,
       preview,
@@ -189,5 +248,5 @@ export async function openTab(tab: vscode.Tab): Promise<void> {
     }
     return;
   }
-  vscode.window.showInformationMessage(`Cannot reopen tab type for "${tab.label}".`);
+  throw new Error('The tab is no longer available.');
 }

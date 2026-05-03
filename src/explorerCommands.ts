@@ -11,6 +11,7 @@ import {
   type PendingKind,
 } from './explorerProvider';
 import type { FilterSource } from './filterSource';
+import { formatOpenError, openResource } from './openResource';
 
 type AnyNode = FileTreeNode;
 type AnyItem = vscode.TreeItem;
@@ -69,6 +70,15 @@ export function registerExplorerCommands(
   updateCompareContext();
 
   context.subscriptions.push(
+    vscode.commands.registerCommand(
+      'tabManager.explorer.open',
+      async (node?: AnyItem | vscode.Uri) => {
+        const uri = node instanceof vscode.Uri ? node : selectedUris(node)[0];
+        if (!uri) return;
+        await openExplorerResource(provider, uri);
+      },
+    ),
+
     vscode.commands.registerCommand('tabManager.explorer.refresh', async () => {
       await filterSource.refresh();
       provider.refresh();
@@ -173,11 +183,7 @@ export function registerExplorerCommands(
         (u, i, arr) => arr.findIndex((v) => v.toString() === u.toString()) === i,
       );
       for (const uri of uris) {
-        try {
-          await vscode.commands.executeCommand('vscode.open', uri, vscode.ViewColumn.Beside);
-        } catch {
-          /* skip non-files */
-        }
+        await openExplorerResource(provider, uri, { viewColumn: vscode.ViewColumn.Beside });
       }
     }),
 
@@ -299,6 +305,20 @@ export function registerExplorerCommands(
   );
 }
 
+async function openExplorerResource(
+  provider: ExplorerProvider,
+  uri: vscode.Uri,
+  options?: vscode.TextDocumentShowOptions,
+): Promise<void> {
+  try {
+    await openResource(uri, options);
+  } catch (error) {
+    provider.invalidateDirectory(parentUri(uri));
+    provider.refresh();
+    vscode.window.showErrorMessage(`Failed to open "${baseName(uri)}": ${formatOpenError(error)}`);
+  }
+}
+
 async function startInlineCreate(
   provider: ExplorerProvider,
   filesView: vscode.TreeView<FileTreeNode>,
@@ -349,7 +369,7 @@ async function startInlineCreate(
       try {
         if (kind === 'file') {
           await vscode.workspace.fs.writeFile(target, new Uint8Array());
-          await vscode.window.showTextDocument(target);
+          await openExplorerResource(provider, target);
         } else {
           await vscode.workspace.fs.createDirectory(target);
         }
@@ -426,4 +446,3 @@ async function resolveContainer(node?: AnyNode): Promise<vscode.Uri | undefined>
   );
   return pick?.uri;
 }
-
