@@ -183,15 +183,27 @@ export function sortTabs(
 
 export async function openTab(tab: vscode.Tab): Promise<void> {
   try {
-    if (!(tab.input instanceof vscode.TabInputWebview)) {
+    if (await focusExistingTab(tab)) return;
+    if (canReopenTab(tab)) {
       await reopenTabResource(tab);
       return;
     }
-    if (await focusExistingTab(tab)) return;
     throw new Error('The tab is no longer available.');
   } catch (error) {
     vscode.window.showErrorMessage(`Failed to open "${tab.label}": ${formatOpenError(error)}`);
   }
+}
+
+function canReopenTab(tab: vscode.Tab): boolean {
+  const input = tab.input;
+  return (
+    input instanceof vscode.TabInputText ||
+    input instanceof vscode.TabInputTextDiff ||
+    input instanceof vscode.TabInputNotebook ||
+    input instanceof vscode.TabInputNotebookDiff ||
+    input instanceof vscode.TabInputCustom ||
+    input instanceof vscode.TabInputTerminal
+  );
 }
 
 async function focusExistingTab(tab: vscode.Tab): Promise<boolean> {
@@ -203,9 +215,9 @@ async function focusExistingTab(tab: vscode.Tab): Promise<boolean> {
   return true;
 }
 
-function findLiveTabLocation(
-  tab: vscode.Tab,
-): { groupIndex: number; tabIndex: number } | undefined {
+type TabLocation = { groupIndex: number; tabIndex: number };
+
+function findLiveTabLocation(tab: vscode.Tab): TabLocation | undefined {
   const groups = vscode.window.tabGroups.all;
   for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
     const tabIndex = groups[groupIndex].tabs.findIndex((t) => t === tab);
@@ -217,7 +229,26 @@ function findLiveTabLocation(
     const tabIndex = groups[groupIndex].tabs.findIndex((t) => tabKey(t) === key);
     if (tabIndex !== -1) return { groupIndex, tabIndex };
   }
-  return undefined;
+  return findUniqueNonResourceTabByLabel(tab, groups);
+}
+
+function findUniqueNonResourceTabByLabel(
+  tab: vscode.Tab,
+  groups: readonly vscode.TabGroup[],
+): TabLocation | undefined {
+  if (resourceUriFor(tab)) return undefined;
+
+  let match: TabLocation | undefined;
+  for (let groupIndex = 0; groupIndex < groups.length; groupIndex++) {
+    const tabs = groups[groupIndex].tabs;
+    for (let tabIndex = 0; tabIndex < tabs.length; tabIndex++) {
+      const candidate = tabs[tabIndex];
+      if (candidate.label !== tab.label || resourceUriFor(candidate)) continue;
+      if (match) return undefined;
+      match = { groupIndex, tabIndex };
+    }
+  }
+  return match;
 }
 
 async function focusEditorGroup(groupIndex: number): Promise<void> {

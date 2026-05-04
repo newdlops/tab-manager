@@ -2,7 +2,7 @@
   "name": "tab-manager",
   "displayName": "Tab Manager",
   "description": "Group, filter, and sort open tabs and workspace files from the activity bar and Explorer.",
-  "version": "0.1.6",
+  "version": "0.1.61",
   "publisher": "newdlops",
   "license": "MIT",
   "icon": "media/icon.png",
