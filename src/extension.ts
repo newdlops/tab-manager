@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { GroupStore, type FilterMode } from './groupStore';
+import { GroupStore, type FilterMode, type SortState, type TabLayoutMode } from './groupStore';
 import { openTab, resourceUriFor } from './tabUtils';
 import { GroupNode, TabNode, TabTreeDataProvider } from './tabProvider';
 import { FilterSource } from './filterSource';
@@ -29,17 +29,33 @@ export function activate(context: vscode.ExtensionContext) {
 
   const scheduleTabRefresh = debounce(() => provider.refresh(), 30);
 
-  const fsWatcher = vscode.workspace.createFileSystemWatcher('**/*');
-  const scheduleExplorerRefresh = debounce(() => explorerProvider.refresh(), 80);
+  // Watch only structural changes (create/delete). File-content changes do
+  // not affect the tree and would otherwise flood the extension during
+  // builds, npm installs, or watch tasks.
+  const fsWatcher = vscode.workspace.createFileSystemWatcher(
+    '**/*',
+    /* ignoreCreateEvents */ false,
+    /* ignoreChangeEvents */ true,
+    /* ignoreDeleteEvents */ false,
+  );
+  const pendingDirInvalidations = new Set<string>();
+  const flushExplorerRefresh = debounce(() => {
+    if (pendingDirInvalidations.size > 0) {
+      for (const dir of pendingDirInvalidations) {
+        explorerProvider.invalidateDirectory(vscode.Uri.parse(dir));
+      }
+      pendingDirInvalidations.clear();
+    }
+    explorerProvider.requestRedraw();
+  }, 80);
   const onFsEvent = (uri: vscode.Uri) => {
-    explorerProvider.invalidateDirectory(
-      uri.with({ path: uri.path.slice(0, uri.path.lastIndexOf('/') || 1) }),
-    );
-    scheduleExplorerRefresh();
+    const slash = uri.path.lastIndexOf('/');
+    const parent = uri.with({ path: slash > 0 ? uri.path.slice(0, slash) : '/' });
+    pendingDirInvalidations.add(parent.toString());
+    flushExplorerRefresh();
   };
   fsWatcher.onDidCreate(onFsEvent);
   fsWatcher.onDidDelete(onFsEvent);
-  fsWatcher.onDidChange(onFsEvent);
 
   registerExplorerCommands(context, explorerProvider, filesView, filterSource);
 
@@ -49,18 +65,48 @@ export function activate(context: vscode.ExtensionContext) {
     return fallback ? [fallback] : [];
   };
 
+  let lastSortContext: SortState | undefined;
+  let lastFilterContext: FilterMode | undefined;
+  let lastLayoutContext: TabLayoutMode | undefined;
+  const updateViewDescriptions = () => {
+    const mode = store.getFilterMode();
+    const layout = store.getTabLayoutMode();
+    const filterDesc = mode === 'none' ? undefined : `Filter: ${capitalize(mode)}`;
+    filesView.description = filterDesc;
+    view.description = [layout === 'byColumn' ? 'By Column' : undefined, filterDesc]
+      .filter((part): part is string => !!part)
+      .join(' · ') || undefined;
+  };
   const syncSortContext = () => {
     const s = store.getSortState();
+    if (
+      lastSortContext &&
+      lastSortContext.name === s.name &&
+      lastSortContext.type === s.type &&
+      lastSortContext.readOnly === s.readOnly
+    ) {
+      return;
+    }
+    lastSortContext = s;
     vscode.commands.executeCommand('setContext', 'tabManager.sortName', s.name);
     vscode.commands.executeCommand('setContext', 'tabManager.sortType', s.type);
     vscode.commands.executeCommand('setContext', 'tabManager.sortReadOnly', s.readOnly);
   };
   const syncFilterState = () => {
     const mode = store.getFilterMode();
-    vscode.commands.executeCommand('setContext', 'tabManager.filterMode', mode);
-    const desc = mode === 'none' ? undefined : `Filter: ${capitalize(mode)}`;
-    view.description = desc;
-    filesView.description = desc;
+    if (lastFilterContext !== mode) {
+      lastFilterContext = mode;
+      vscode.commands.executeCommand('setContext', 'tabManager.filterMode', mode);
+    }
+    updateViewDescriptions();
+  };
+  const syncLayoutState = () => {
+    const mode = store.getTabLayoutMode();
+    if (lastLayoutContext !== mode) {
+      lastLayoutContext = mode;
+      vscode.commands.executeCommand('setContext', 'tabManager.tabLayout', mode);
+    }
+    updateViewDescriptions();
   };
   const syncExplorerTitle = () => {
     filesView.title = vscode.workspace.name ?? 'Workspace';
@@ -68,9 +114,11 @@ export function activate(context: vscode.ExtensionContext) {
   syncExplorerTitle();
   syncSortContext();
   syncFilterState();
+  syncLayoutState();
   store.onDidChange(() => {
     syncSortContext();
     syncFilterState();
+    syncLayoutState();
   });
 
   context.subscriptions.push(
@@ -175,16 +223,15 @@ export function activate(context: vscode.ExtensionContext) {
       }
       if (!groupId) return;
 
-      for (const t of targets) {
-        await store.addTabToGroup(groupId, t.key);
-      }
+      await store.addTabsToGroup(
+        groupId,
+        targets.map((t) => t.key),
+      );
     }),
 
     vscode.commands.registerCommand('tabManager.removeFromGroup', async (node: TabNode) => {
       const targets = selectedTabNodes(node);
-      for (const t of targets) {
-        await store.removeTabFromGroup(t.key);
-      }
+      await store.removeTabsFromGroups(targets.map((t) => t.key));
     }),
 
     vscode.commands.registerCommand('tabManager.sort.nameAsc', () => store.setNameSort('asc')),
@@ -193,6 +240,12 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('tabManager.sort.toggleType', () => store.toggleTypeSort()),
     vscode.commands.registerCommand('tabManager.sort.toggleReadOnly', () =>
       store.toggleReadOnlySort(),
+    ),
+    vscode.commands.registerCommand('tabManager.layout.byColumn', () =>
+      store.setTabLayoutMode('byColumn'),
+    ),
+    vscode.commands.registerCommand('tabManager.layout.merged', () =>
+      store.setTabLayoutMode('merged'),
     ),
 
     vscode.commands.registerCommand('tabManager.filter.modified', () =>

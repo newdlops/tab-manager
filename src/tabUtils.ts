@@ -98,18 +98,51 @@ export function tabTypeKey(tab: vscode.Tab): string {
 }
 
 function computeTabTypeKey(tab: vscode.Tab): string {
+  const input = tab.input;
+  if (input instanceof vscode.TabInputTextDiff) {
+    const ext = fileExt(input.modified) || fileExt(input.original);
+    if (isGitWorkingTreeDiff(input.original, input.modified)) {
+      return `git-working-tree:${ext}`;
+    }
+    return `diff:${ext}`;
+  }
+  if (input instanceof vscode.TabInputNotebookDiff) {
+    const ext = fileExt(input.modified) || fileExt(input.original);
+    return `notebook-diff:${ext}`;
+  }
+
   const uri = resourceUriFor(tab);
   if (uri) {
-    const p = uri.path;
-    const slash = p.lastIndexOf('/');
-    const dot = p.lastIndexOf('.');
-    if (dot > slash) return p.slice(dot + 1).toLowerCase();
-    return '';
+    const ext = fileExt(uri);
+    if (uri.scheme === 'git') return `git:${ext}`;
+    return ext;
   }
-  const input = tab.input;
   if (input instanceof vscode.TabInputTerminal) return 'terminal';
   if (input instanceof vscode.TabInputWebview) return 'webview';
   return 'other';
+}
+
+export function tabColumnKey(tab: vscode.Tab): string {
+  return String(tab.group.viewColumn);
+}
+
+export function tabColumnLabel(tab: vscode.Tab): string {
+  return columnLabel(tab.group.viewColumn);
+}
+
+export function columnLabel(viewColumn: vscode.ViewColumn): string {
+  return viewColumn > 0 ? `Column ${viewColumn}` : 'Column';
+}
+
+function fileExt(uri: vscode.Uri): string {
+  const p = uri.path;
+  const slash = p.lastIndexOf('/');
+  const dot = p.lastIndexOf('.');
+  return dot > slash ? p.slice(dot + 1).toLowerCase() : '';
+}
+
+function isGitWorkingTreeDiff(original: vscode.Uri, modified: vscode.Uri): boolean {
+  return original.scheme === 'git' || modified.scheme === 'git';
 }
 
 export function sortTabs(
@@ -150,8 +183,12 @@ export function sortTabs(
 
 export async function openTab(tab: vscode.Tab): Promise<void> {
   try {
+    if (!(tab.input instanceof vscode.TabInputWebview)) {
+      await reopenTabResource(tab);
+      return;
+    }
     if (await focusExistingTab(tab)) return;
-    await reopenTabResource(tab);
+    throw new Error('The tab is no longer available.');
   } catch (error) {
     vscode.window.showErrorMessage(`Failed to open "${tab.label}": ${formatOpenError(error)}`);
   }

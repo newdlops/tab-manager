@@ -6,9 +6,25 @@ export class UnsavedDecorationProvider implements vscode.FileDecorationProvider,
   readonly onDidChangeFileDecorations = this._onDidChange.event;
 
   private readonly disposable: vscode.Disposable;
+  private prevKeys: Set<string> = new Set();
 
   constructor(private readonly filter: FilterSource) {
-    this.disposable = filter.onDidChange(() => this._onDidChange.fire(undefined));
+    this.prevKeys = new Set(filter.getDirtyKeySet());
+    this.disposable = filter.onDidChange(() => this.fireDelta());
+  }
+
+  private fireDelta(): void {
+    const current = this.filter.getDirtyKeySet();
+    const changed: vscode.Uri[] = [];
+    for (const k of this.prevKeys) {
+      if (!current.has(k)) changed.push(vscode.Uri.parse(k));
+    }
+    for (const k of current) {
+      if (!this.prevKeys.has(k)) changed.push(vscode.Uri.parse(k));
+    }
+    this.prevKeys = new Set(current);
+    if (changed.length === 0) return;
+    this._onDidChange.fire(changed);
   }
 
   provideFileDecoration(uri: vscode.Uri): vscode.FileDecoration | undefined {

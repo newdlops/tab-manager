@@ -122,12 +122,16 @@ export class FilterSource implements vscode.Disposable {
   }
 
   isDirty(uri: vscode.Uri): boolean {
+    return this.getDirtyKeySet().has(uri.toString());
+  }
+
+  getDirtyKeySet(): ReadonlySet<string> {
     if (!this.dirtySetCache) {
       const set = new Set<string>();
       for (const uri of this.computeDirtyUris()) set.add(uri.toString());
       this.dirtySetCache = set;
     }
-    return this.dirtySetCache.has(uri.toString());
+    return this.dirtySetCache;
   }
 
   isReadOnly(uri: vscode.Uri): boolean {
@@ -248,13 +252,17 @@ export class FilterSource implements vscode.Disposable {
 
   matches(uri: vscode.Uri, mode: FilterMode): boolean {
     if (mode === 'none') return true;
+    return this.getUriKeySet(mode).has(uri.toString());
+  }
+
+  getUriKeySet(mode: FilterMode): ReadonlySet<string> {
     let set = this.matchSetCache.get(mode);
     if (!set) {
-      const uris = this.getUris(mode);
-      set = new Set(uris.map((u) => u.toString()));
+      set = new Set<string>();
+      for (const uri of this.getUris(mode)) set.add(uri.toString());
       this.matchSetCache.set(mode, set);
     }
-    return set.has(uri.toString());
+    return set;
   }
 
   getUris(mode: FilterMode): vscode.Uri[] {

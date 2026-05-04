@@ -79,15 +79,24 @@ export class ExplorerProvider
   readonly dropMimeTypes = [INTERNAL_MIME, 'text/uri-list'];
   readonly dragMimeTypes = ['text/uri-list'];
 
-  private cache?: { mode: FilterMode; matching: Set<string>; ancestors: Set<string> };
+  private cache?: {
+    mode: FilterMode;
+    matching: ReadonlySet<string>;
+    ancestors: Set<string>;
+    deletedByParent?: Map<string, vscode.Uri[]>;
+  };
   private readonly dirCache = new Map<string, [string, vscode.FileType][]>();
   private pending?: { parentUri: vscode.Uri; kind: PendingKind; name: string };
+  private lastFilterMode: FilterMode;
+  private lastSortState: SortState;
 
   constructor(
     private readonly store: GroupStore,
     private readonly filter: FilterSource,
   ) {
-    store.onDidChange(() => this.refreshFilter());
+    this.lastFilterMode = store.getFilterMode();
+    this.lastSortState = store.getSortState();
+    store.onDidChange(() => this.refreshStoreState());
     filter.onDidChange(() => this.refreshFilter());
   }
 
@@ -166,9 +175,26 @@ export class ExplorerProvider
     this._onDidChangeTreeData.fire(undefined);
   }
 
+  requestRedraw(): void {
+    this._onDidChangeTreeData.fire(undefined);
+  }
+
   private refreshFilter(): void {
     this.cache = undefined;
     this._onDidChangeTreeData.fire(undefined);
+  }
+
+  private refreshStoreState(): void {
+    const mode = this.store.getFilterMode();
+    const sort = this.store.getSortState();
+    const filterChanged = mode !== this.lastFilterMode;
+    const sortChanged =
+      sort.name !== this.lastSortState.name || sort.type !== this.lastSortState.type;
+    this.lastFilterMode = mode;
+    this.lastSortState = sort;
+
+    if (filterChanged) this.refreshFilter();
+    else if (sortChanged) this.requestRedraw();
   }
 
   invalidateDirectory(uri: vscode.Uri): void {
@@ -283,11 +309,8 @@ export class ExplorerProvider
     }
 
     if (mode === 'deleted') {
-      const deleted = this.filter.getUris('deleted');
-      const folderKey = folder.toString();
-      for (const du of deleted) {
-        if (parentUri(du).toString() === folderKey) nodes.push(new FileNode(du, true));
-      }
+      const deleted = this.cache?.deletedByParent?.get(cacheKey) ?? [];
+      for (const du of deleted) nodes.push(new FileNode(du, true));
     }
 
     nodes.sort(makeCompareNodes(this.store.getSortState()));
@@ -306,10 +329,17 @@ export class ExplorerProvider
       return;
     }
     const uris = this.filter.getUris(mode);
-    const matching = new Set(uris.map((u) => u.toString()));
+    const matching = this.filter.getUriKeySet(mode);
     const ancestors = new Set<string>();
+    const deletedByParent = mode === 'deleted' ? new Map<string, vscode.Uri[]>() : undefined;
     for (const uri of uris) {
       let p = parentUri(uri);
+      if (deletedByParent) {
+        const parentKey = p.toString();
+        const existing = deletedByParent.get(parentKey);
+        if (existing) existing.push(uri);
+        else deletedByParent.set(parentKey, [uri]);
+      }
       while (true) {
         const s = p.toString();
         if (ancestors.has(s)) break;
@@ -319,7 +349,7 @@ export class ExplorerProvider
         p = np;
       }
     }
-    this.cache = { mode, matching, ancestors };
+    this.cache = { mode, matching, ancestors, deletedByParent };
   }
 }
 

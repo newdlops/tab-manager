@@ -2,11 +2,11 @@
   "name": "tab-manager",
   "displayName": "Tab Manager",
   "description": "Group, filter, and sort open tabs and workspace files from the activity bar and Explorer.",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "publisher": "newdlops",
   "license": "MIT",
   "icon": "media/icon.png",
-  "preview": true,
+  "preview": false,
   "qna": false,
   "repository": {
     "type": "git",
@@ -190,6 +190,18 @@
         "category": "Tab Manager"
       },
       {
+        "command": "tabManager.layout.byColumn",
+        "title": "Show Tabs by Editor Column",
+        "icon": "$(split-horizontal)",
+        "category": "Tab Manager"
+      },
+      {
+        "command": "tabManager.layout.merged",
+        "title": "Show All Columns Combined",
+        "icon": "$(list-flat)",
+        "category": "Tab Manager"
+      },
+      {
         "command": "tabManager.explorer.newFile",
         "title": "New File...",
         "icon": "$(new-file)",
@@ -254,6 +266,12 @@
         "category": "Extended Explorer"
       },
       {
+        "command": "tabManager.explorer.installVsix",
+        "title": "Install VSIX Extension",
+        "icon": "$(extensions)",
+        "category": "Extended Explorer"
+      },
+      {
         "command": "tabManager.explorer.findInFolder",
         "title": "Find in Folder...",
         "category": "Extended Explorer"
@@ -300,6 +318,16 @@
           "command": "tabManager.closeSelected",
           "when": "view == tabManagerView",
           "group": "navigation@2"
+        },
+        {
+          "command": "tabManager.layout.byColumn",
+          "when": "view == tabManagerView && tabManager.tabLayout != 'byColumn'",
+          "group": "navigation@3"
+        },
+        {
+          "command": "tabManager.layout.merged",
+          "when": "view == tabManagerView && tabManager.tabLayout != 'merged'",
+          "group": "navigation@3"
         },
         {
           "command": "tabManager.explorer.newFile",
@@ -395,6 +423,30 @@
           "command": "tabManager.filter.clear",
           "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.filterMode != 'none'",
           "group": "3_filter@6"
+        },
+        {
+          "command": "tabManager.layout.byColumn",
+          "title": "✓ Show Tabs by Editor Column",
+          "when": "view == tabManagerView && tabManager.tabLayout == 'byColumn'",
+          "group": "0_layout@1"
+        },
+        {
+          "command": "tabManager.layout.byColumn",
+          "title": "Show Tabs by Editor Column",
+          "when": "view == tabManagerView && tabManager.tabLayout != 'byColumn'",
+          "group": "0_layout@1"
+        },
+        {
+          "command": "tabManager.layout.merged",
+          "title": "✓ Show All Columns Combined",
+          "when": "view == tabManagerView && tabManager.tabLayout == 'merged'",
+          "group": "0_layout@2"
+        },
+        {
+          "command": "tabManager.layout.merged",
+          "title": "Show All Columns Combined",
+          "when": "view == tabManagerView && tabManager.tabLayout != 'merged'",
+          "group": "0_layout@2"
         },
         {
           "command": "tabManager.sort.nameAsc",
@@ -494,6 +546,11 @@
           "group": "3_explorer_open@2"
         },
         {
+          "command": "tabManager.explorer.installVsix",
+          "when": "view == tabManagerView && viewItem =~ /^tab\\.file(\\.grouped)?$/ && resourceExtname == .vsix",
+          "group": "3_explorer_open@3"
+        },
+        {
           "command": "tabManager.explorer.revealInOS",
           "when": "view == tabManagerView && viewItem =~ /^tab\\.file(\\.grouped)?$/",
           "group": "4_explorer_workspace@1"
@@ -562,6 +619,11 @@
           "command": "tabManager.explorer.openWith",
           "when": "view == tabManagerExplorer && viewItem == file",
           "group": "navigation@3"
+        },
+        {
+          "command": "tabManager.explorer.installVsix",
+          "when": "view == tabManagerExplorer && viewItem == file && resourceExtname == .vsix",
+          "group": "navigation@4"
         },
         {
           "command": "tabManager.explorer.revealInOS",

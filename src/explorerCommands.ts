@@ -194,6 +194,33 @@ export function registerExplorerCommands(
     }),
 
     vscode.commands.registerCommand(
+      'tabManager.explorer.installVsix',
+      async (node?: AnyItem, items?: AnyItem[]) => {
+        const uris = selectedUris(node, items).filter(isVsixFile);
+        if (uris.length === 0) return;
+
+        await vscode.window.withProgress(
+          {
+            location: vscode.ProgressLocation.Notification,
+            title: `Installing ${uris.length === 1 ? baseName(uris[0]) : `${uris.length} VSIX files`}`,
+            cancellable: false,
+          },
+          async () => {
+            for (const uri of uris) {
+              try {
+                await vscode.commands.executeCommand('workbench.extensions.installExtension', uri);
+              } catch (error) {
+                vscode.window.showErrorMessage(
+                  `Failed to install "${baseName(uri)}": ${formatOpenError(error)}`,
+                );
+              }
+            }
+          },
+        );
+      },
+    ),
+
+    vscode.commands.registerCommand(
       'tabManager.explorer.findInFolder',
       async (node?: AnyNode) => {
         const uri = selectedUris(node)[0];
@@ -406,6 +433,10 @@ function uriOf(node: AnyItem | undefined): vscode.Uri | undefined {
 function isModifiable(uri: vscode.Uri): boolean {
   const folders = vscode.workspace.workspaceFolders ?? [];
   return !folders.some((f) => f.uri.toString() === uri.toString());
+}
+
+function isVsixFile(uri: vscode.Uri): boolean {
+  return uri.scheme === 'file' && baseName(uri).toLowerCase().endsWith('.vsix');
 }
 
 async function exists(uri: vscode.Uri): Promise<boolean> {
