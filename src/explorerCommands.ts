@@ -12,6 +12,7 @@ import {
 } from './explorerProvider';
 import type { FilterSource } from './filterSource';
 import { formatOpenError, openResource } from './openResource';
+import { isVsixFileName } from './util';
 
 type AnyNode = FileTreeNode;
 type AnyItem = vscode.TreeItem;
@@ -436,7 +437,7 @@ function isModifiable(uri: vscode.Uri): boolean {
 }
 
 function isVsixFile(uri: vscode.Uri): boolean {
-  return uri.scheme === 'file' && baseName(uri).toLowerCase().endsWith('.vsix');
+  return uri.scheme === 'file' && isVsixFileName(baseName(uri));
 }
 
 async function exists(uri: vscode.Uri): Promise<boolean> {

@@ -2,7 +2,7 @@
   "name": "tab-manager",
   "displayName": "Tab Manager",
   "description": "Group, filter, and sort open tabs and workspace files from the activity bar and Explorer.",
-  "version": "0.1.61",
+  "version": "0.1.62",
   "publisher": "newdlops",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -512,92 +512,92 @@
       "view/item/context": [
         {
           "command": "tabManager.closeTab",
-          "when": "view == tabManagerView && viewItem =~ /^tab(\\.file)?(\\.grouped)?$/",
+          "when": "view == tabManagerView && viewItem =~ /^tab(\\..+)?$/",
           "group": "inline@1"
         },
         {
           "command": "tabManager.closeTab",
-          "when": "view == tabManagerView && viewItem =~ /^tab(\\.file)?(\\.grouped)?$/",
+          "when": "view == tabManagerView && viewItem =~ /^tab(\\..+)?$/",
           "group": "1_close@1"
         },
         {
           "command": "tabManager.closeSelected",
-          "when": "view == tabManagerView && viewItem =~ /^tab(\\.file)?(\\.grouped)?$/",
+          "when": "view == tabManagerView && viewItem =~ /^tab(\\..+)?$/",
           "group": "1_close@2"
         },
         {
           "command": "tabManager.addToGroup",
-          "when": "view == tabManagerView && viewItem =~ /^tab(\\.file)?(\\.grouped)?$/",
+          "when": "view == tabManagerView && viewItem =~ /^tab(\\..+)?$/",
           "group": "2_group@1"
         },
         {
           "command": "tabManager.removeFromGroup",
-          "when": "view == tabManagerView && viewItem =~ /^tab(\\.file)?\\.grouped$/",
+          "when": "view == tabManagerView && viewItem =~ /^tab(\\..+)?\\.grouped$/",
           "group": "2_group@2"
         },
         {
           "command": "tabManager.explorer.openToSide",
-          "when": "view == tabManagerView && viewItem =~ /^tab\\.file(\\.grouped)?$/",
+          "when": "view == tabManagerView && viewItem =~ /^tab\\.file\\.ext\\.[^.]+(\\.grouped)?$/",
           "group": "3_explorer_open@1"
         },
         {
           "command": "tabManager.explorer.openWith",
-          "when": "view == tabManagerView && viewItem =~ /^tab\\.file(\\.grouped)?$/",
+          "when": "view == tabManagerView && viewItem =~ /^tab\\.file\\.ext\\.[^.]+(\\.grouped)?$/",
           "group": "3_explorer_open@2"
         },
         {
           "command": "tabManager.explorer.installVsix",
-          "when": "view == tabManagerView && viewItem =~ /^tab\\.file(\\.grouped)?$/ && resourceExtname == .vsix",
+          "when": "view == tabManagerView && viewItem =~ /^tab\\.file\\.ext\\.vsix(\\.grouped)?$/",
           "group": "3_explorer_open@3"
         },
         {
           "command": "tabManager.explorer.revealInOS",
-          "when": "view == tabManagerView && viewItem =~ /^tab\\.file(\\.grouped)?$/",
+          "when": "view == tabManagerView && viewItem =~ /^tab\\.file\\.ext\\.[^.]+(\\.grouped)?$/",
           "group": "4_explorer_workspace@1"
         },
         {
           "command": "tabManager.explorer.cut",
-          "when": "view == tabManagerView && viewItem =~ /^tab\\.file(\\.grouped)?$/",
+          "when": "view == tabManagerView && viewItem =~ /^tab\\.file\\.ext\\.[^.]+(\\.grouped)?$/",
           "group": "5_explorer_cutcopy@1"
         },
         {
           "command": "tabManager.explorer.copy",
-          "when": "view == tabManagerView && viewItem =~ /^tab\\.file(\\.grouped)?$/",
+          "when": "view == tabManagerView && viewItem =~ /^tab\\.file\\.ext\\.[^.]+(\\.grouped)?$/",
           "group": "5_explorer_cutcopy@2"
         },
         {
           "command": "tabManager.explorer.copyPath",
-          "when": "view == tabManagerView && viewItem =~ /^tab\\.file(\\.grouped)?$/",
+          "when": "view == tabManagerView && viewItem =~ /^tab\\.file\\.ext\\.[^.]+(\\.grouped)?$/",
           "group": "6_explorer_path@1"
         },
         {
           "command": "tabManager.explorer.copyRelativePath",
-          "when": "view == tabManagerView && viewItem =~ /^tab\\.file(\\.grouped)?$/",
+          "when": "view == tabManagerView && viewItem =~ /^tab\\.file\\.ext\\.[^.]+(\\.grouped)?$/",
           "group": "6_explorer_path@2"
         },
         {
           "command": "tabManager.explorer.selectForCompare",
-          "when": "view == tabManagerView && viewItem =~ /^tab\\.file(\\.grouped)?$/",
+          "when": "view == tabManagerView && viewItem =~ /^tab\\.file\\.ext\\.[^.]+(\\.grouped)?$/",
           "group": "7_explorer_compare@1"
         },
         {
           "command": "tabManager.explorer.compareWithSelected",
-          "when": "view == tabManagerView && viewItem =~ /^tab\\.file(\\.grouped)?$/ && tabManager.explorerHasCompareLeft",
+          "when": "view == tabManagerView && viewItem =~ /^tab\\.file\\.ext\\.[^.]+(\\.grouped)?$/ && tabManager.explorerHasCompareLeft",
           "group": "7_explorer_compare@2"
         },
         {
           "command": "tabManager.explorer.compareSelected",
-          "when": "view == tabManagerView && viewItem =~ /^tab\\.file(\\.grouped)?$/ && listMultiSelection",
+          "when": "view == tabManagerView && viewItem =~ /^tab\\.file\\.ext\\.[^.]+(\\.grouped)?$/ && listMultiSelection",
           "group": "7_explorer_compare@3"
         },
         {
           "command": "tabManager.explorer.rename",
-          "when": "view == tabManagerView && viewItem =~ /^tab\\.file(\\.grouped)?$/",
+          "when": "view == tabManagerView && viewItem =~ /^tab\\.file\\.ext\\.[^.]+(\\.grouped)?$/",
           "group": "8_explorer_modify@1"
         },
         {
           "command": "tabManager.explorer.delete",
-          "when": "view == tabManagerView && viewItem =~ /^tab\\.file(\\.grouped)?$/",
+          "when": "view == tabManagerView && viewItem =~ /^tab\\.file\\.ext\\.[^.]+(\\.grouped)?$/",
           "group": "8_explorer_modify@2"
         },
         {
@@ -612,22 +612,22 @@
         },
         {
           "command": "tabManager.explorer.openToSide",
-          "when": "view == tabManagerExplorer && viewItem == file",
+          "when": "view == tabManagerExplorer && viewItem =~ /^file\\.ext\\.[^.]+$/",
           "group": "navigation@2"
         },
         {
           "command": "tabManager.explorer.openWith",
-          "when": "view == tabManagerExplorer && viewItem == file",
+          "when": "view == tabManagerExplorer && viewItem =~ /^file\\.ext\\.[^.]+$/",
           "group": "navigation@3"
         },
         {
           "command": "tabManager.explorer.installVsix",
-          "when": "view == tabManagerExplorer && viewItem == file && resourceExtname == .vsix",
+          "when": "view == tabManagerExplorer && viewItem == file.ext.vsix",
           "group": "navigation@4"
         },
         {
           "command": "tabManager.explorer.revealInOS",
-          "when": "view == tabManagerExplorer && viewItem =~ /^(file|directory|workspaceFolder)$/",
+          "when": "view == tabManagerExplorer && viewItem =~ /^(file\\.ext\\.[^.]+|directory|workspaceFolder)$/",
           "group": "2_workspace@1"
         },
         {
@@ -652,12 +652,12 @@
         },
         {
           "command": "tabManager.explorer.cut",
-          "when": "view == tabManagerExplorer && viewItem =~ /^(file|directory)$/",
+          "when": "view == tabManagerExplorer && viewItem =~ /^(file\\.ext\\.[^.]+|directory)$/",
           "group": "5_cutcopypaste@1"
         },
         {
           "command": "tabManager.explorer.copy",
-          "when": "view == tabManagerExplorer && viewItem =~ /^(file|directory|workspaceFolder)$/",
+          "when": "view == tabManagerExplorer && viewItem =~ /^(file\\.ext\\.[^.]+|directory|workspaceFolder)$/",
           "group": "5_cutcopypaste@2"
         },
         {
@@ -667,37 +667,37 @@
         },
         {
           "command": "tabManager.explorer.copyPath",
-          "when": "view == tabManagerExplorer && viewItem =~ /^(file|directory|workspaceFolder)$/",
+          "when": "view == tabManagerExplorer && viewItem =~ /^(file\\.ext\\.[^.]+|directory|workspaceFolder)$/",
           "group": "6_path@1"
         },
         {
           "command": "tabManager.explorer.copyRelativePath",
-          "when": "view == tabManagerExplorer && viewItem =~ /^(file|directory|workspaceFolder)$/",
+          "when": "view == tabManagerExplorer && viewItem =~ /^(file\\.ext\\.[^.]+|directory|workspaceFolder)$/",
           "group": "6_path@2"
         },
         {
           "command": "tabManager.explorer.selectForCompare",
-          "when": "view == tabManagerExplorer && viewItem == file",
+          "when": "view == tabManagerExplorer && viewItem =~ /^file\\.ext\\.[^.]+$/",
           "group": "7_compare@1"
         },
         {
           "command": "tabManager.explorer.compareWithSelected",
-          "when": "view == tabManagerExplorer && viewItem == file && tabManager.explorerHasCompareLeft",
+          "when": "view == tabManagerExplorer && viewItem =~ /^file\\.ext\\.[^.]+$/ && tabManager.explorerHasCompareLeft",
           "group": "7_compare@2"
         },
         {
           "command": "tabManager.explorer.compareSelected",
-          "when": "view == tabManagerExplorer && viewItem == file && listMultiSelection",
+          "when": "view == tabManagerExplorer && viewItem =~ /^file\\.ext\\.[^.]+$/ && listMultiSelection",
           "group": "7_compare@3"
         },
         {
           "command": "tabManager.explorer.rename",
-          "when": "view == tabManagerExplorer && viewItem =~ /^(file|directory)$/",
+          "when": "view == tabManagerExplorer && viewItem =~ /^(file\\.ext\\.[^.]+|directory)$/",
           "group": "8_modify@1"
         },
         {
           "command": "tabManager.explorer.delete",
-          "when": "view == tabManagerExplorer && viewItem =~ /^(file|directory)$/",
+          "when": "view == tabManagerExplorer && viewItem =~ /^(file\\.ext\\.[^.]+|directory)$/",
           "group": "8_modify@2"
         }
       ]

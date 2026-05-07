@@ -11,7 +11,7 @@ import {
   tabTypeCategory,
   type TabTypeCategory,
 } from './tabUtils';
-import { debounce } from './util';
+import { debounce, fileTabContextValue, typedTabContextValue } from './util';
 
 export type TabTreeNode = ColumnNode | GroupNode | UngroupedHeaderNode | TabNode;
 
@@ -70,8 +70,10 @@ export class TabNode extends vscode.TreeItem {
     this.key = tabKey(tab);
 
     const uri = resourceUriFor(tab);
-    const base = uri ? 'tab.file' : 'tab';
-    this.contextValue = inGroup ? `${base}.grouped` : base;
+    const category = tabTypeCategory(tab);
+    this.contextValue = uri
+      ? fileTabContextValue(uri.path, { grouped: inGroup })
+      : typedTabContextValue(category, { grouped: inGroup });
 
     const descParts: string[] = [];
     if (uri) {
@@ -80,7 +82,6 @@ export class TabNode extends vscode.TreeItem {
       descParts.push(vscode.workspace.asRelativePath(uri, false));
       this.tooltip = uri.fsPath;
     } else {
-      const category = tabTypeCategory(tab);
       this.iconPath = new vscode.ThemeIcon(iconForType(category));
       descParts.push(category);
       this.tooltip = tab.label;

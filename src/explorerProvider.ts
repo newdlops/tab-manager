@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import type { GroupStore, FilterMode, SortState } from './groupStore';
 import type { FilterSource } from './filterSource';
+import { fileContextValue } from './util';
 
 export type FileTreeNode = WorkspaceFolderNode | DirectoryNode | FileNode | PendingNode;
 export type PendingKind = 'file' | 'folder';
@@ -45,10 +46,10 @@ export class FileNode extends vscode.TreeItem {
     this.id = `file:${isDeleted ? 'deleted:' : ''}${uri.toString()}`;
     if (isDeleted) {
       this.description = 'deleted';
-      this.contextValue = 'file.deleted';
+      this.contextValue = fileContextValue(baseName(uri), { deleted: true });
       this.tooltip = `${uri.fsPath} (deleted)`;
     } else {
-      this.contextValue = 'file';
+      this.contextValue = fileContextValue(baseName(uri));
       this.tooltip = uri.fsPath;
       this.command = {
         command: 'tabManager.explorer.open',
