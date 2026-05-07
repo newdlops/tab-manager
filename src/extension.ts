@@ -52,6 +52,7 @@ export function activate(context: vscode.ExtensionContext) {
     const slash = uri.path.lastIndexOf('/');
     const parent = uri.with({ path: slash > 0 ? uri.path.slice(0, slash) : '/' });
     pendingDirInvalidations.add(parent.toString());
+    filterSource.notifyFileSystemChange(uri);
     flushExplorerRefresh();
   };
   fsWatcher.onDidCreate(onFsEvent);

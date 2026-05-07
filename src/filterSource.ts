@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
 import type { FilterMode } from './groupStore';
 import { resourceUriFor } from './tabUtils';
 import { debounce } from './util';
@@ -139,6 +140,16 @@ export class FilterSource implements vscode.Disposable {
     return this.readOnlyCache.get(uri.toString()) ?? false;
   }
 
+  isMissing(uri: vscode.Uri): boolean {
+    return isMissingWorkspaceFile(uri);
+  }
+
+  notifyFileSystemChange(uri: vscode.Uri): void {
+    if (!this.hasOpenTabUri(uri)) return;
+    this.fireDebounced();
+    this.schedulePopulateReadOnly();
+  }
+
   private async populateReadOnly(): Promise<void> {
     const token = ++this.readonlyPopulationToken;
     const live = new Set<string>();
@@ -211,6 +222,32 @@ export class FilterSource implements vscode.Disposable {
       }
     }
     return uris;
+  }
+
+  private computeMissingOpenTabUris(): vscode.Uri[] {
+    const seen = new Set<string>();
+    const uris: vscode.Uri[] = [];
+    for (const group of vscode.window.tabGroups.all) {
+      for (const tab of group.tabs) {
+        const uri = resourceUriFor(tab);
+        if (!uri || !this.isMissing(uri)) continue;
+        const key = uri.toString();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        uris.push(uri);
+      }
+    }
+    return uris;
+  }
+
+  private hasOpenTabUri(uri: vscode.Uri): boolean {
+    const key = uri.toString();
+    for (const group of vscode.window.tabGroups.all) {
+      for (const tab of group.tabs) {
+        if (resourceUriFor(tab)?.toString() === key) return true;
+      }
+    }
+    return false;
   }
 
   private async bootstrapGit(): Promise<void> {
@@ -315,17 +352,25 @@ export class FilterSource implements vscode.Disposable {
       return uris;
     }
     const wanted = gitStatusFor(mode);
-    if (wanted === undefined || !this.git) return [];
+    if (wanted === undefined) return [];
     const seen = new Set<string>();
     const uris: vscode.Uri[] = [];
-    for (const repo of this.git.repositories) {
-      for (const ch of repo.state.workingTreeChanges) {
-        if (ch.status !== wanted) continue;
-        const key = ch.uri.toString();
-        if (seen.has(key)) continue;
-        seen.add(key);
-        uris.push(ch.uri);
+    const addUri = (uri: vscode.Uri) => {
+      const key = uri.toString();
+      if (seen.has(key)) return;
+      seen.add(key);
+      uris.push(uri);
+    };
+    if (this.git) {
+      for (const repo of this.git.repositories) {
+        for (const ch of repo.state.workingTreeChanges) {
+          if (ch.status !== wanted) continue;
+          addUri(ch.uri);
+        }
       }
+    }
+    if (mode === 'untracked') {
+      for (const uri of this.computeMissingOpenTabUris()) addUri(uri);
     }
     return uris;
   }
@@ -335,6 +380,12 @@ export class FilterSource implements vscode.Disposable {
     this.repoDisposables.clear();
     for (const d of this.disposables) d.dispose();
   }
+}
+
+function isMissingWorkspaceFile(uri: vscode.Uri): boolean {
+  if (uri.scheme !== 'file') return false;
+  if (!vscode.workspace.getWorkspaceFolder(uri)) return false;
+  return !fs.existsSync(uri.fsPath);
 }
 
 function gitStatusFor(mode: FilterMode): GitStatus | undefined {

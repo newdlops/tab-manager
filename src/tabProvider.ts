@@ -65,6 +65,7 @@ export class TabNode extends vscode.TreeItem {
     public readonly inGroup: boolean,
     isReadOnly = false,
     showColumn = false,
+    isMissing = false,
   ) {
     super(tab.label, vscode.TreeItemCollapsibleState.None);
     this.key = tabKey(tab);
@@ -90,6 +91,7 @@ export class TabNode extends vscode.TreeItem {
     if (tab.isPreview) descParts.push('preview');
     if (tab.isDirty) descParts.push('unsaved');
     if (isReadOnly) descParts.push('read-only');
+    if (isMissing) descParts.push('missing');
     this.description = descParts.join(' · ');
 
     this.command = {
@@ -171,6 +173,11 @@ export class TabTreeDataProvider implements vscode.TreeDataProvider<TabTreeNode>
     return uri ? this.filter.isReadOnly(uri) : false;
   };
 
+  private isTabMissing = (tab: vscode.Tab): boolean => {
+    const uri = resourceUriFor(tab);
+    return uri ? this.filter.isMissing(uri) : false;
+  };
+
   getChildren(element?: TabTreeNode): TabTreeNode[] {
     const allTabs = this.getFilteredTabs();
     const sortMode = this.store.getSortState();
@@ -196,7 +203,14 @@ export class TabTreeDataProvider implements vscode.TreeDataProvider<TabTreeNode>
         wanted.has(tabKey(t)),
       );
       return sortTabs(tabs, sortMode, this.isTabReadOnly).map(
-        (t) => new TabNode(t, true, this.isTabReadOnly(t), !element.columnKey),
+        (t) =>
+          new TabNode(
+            t,
+            true,
+            this.isTabReadOnly(t),
+            !element.columnKey,
+            this.isTabMissing(t),
+          ),
       );
     }
 
@@ -206,7 +220,14 @@ export class TabTreeDataProvider implements vscode.TreeDataProvider<TabTreeNode>
         (t) => !tabKeyToGroup.has(tabKey(t)),
       );
       return sortTabs(tabs, sortMode, this.isTabReadOnly).map(
-        (t) => new TabNode(t, false, this.isTabReadOnly(t), !element.columnKey),
+        (t) =>
+          new TabNode(
+            t,
+            false,
+            this.isTabReadOnly(t),
+            !element.columnKey,
+            this.isTabMissing(t),
+          ),
       );
     }
 
@@ -243,7 +264,8 @@ export class TabTreeDataProvider implements vscode.TreeDataProvider<TabTreeNode>
     const groups = this.store.getGroups();
     if (groups.length === 0) {
       return sortTabs(tabs, sortMode, this.isTabReadOnly).map(
-        (t) => new TabNode(t, false, this.isTabReadOnly(t), !columnKey),
+        (t) =>
+          new TabNode(t, false, this.isTabReadOnly(t), !columnKey, this.isTabMissing(t)),
       );
     }
 
