@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import type { GroupStore, FilterMode, SortState } from './groupStore';
 import type { FilterSource, FilterSourceChangeEvent } from './filterSource';
+import { formatOpenError } from './openResource';
 import { debounce, fileContextValue } from './util';
 
 export type FileTreeNode = WorkspaceFolderNode | DirectoryNode | FileNode | PendingNode;
@@ -127,27 +128,11 @@ export class ExplorerProvider
     if (!dest) return;
 
     let sources: vscode.Uri[] = [];
-    const internal = dataTransfer.get(INTERNAL_MIME);
-    if (internal) {
-      const v = internal.value;
-      if (Array.isArray(v)) sources = v.filter((x): x is vscode.Uri => x instanceof vscode.Uri);
-    } else {
-      const external = dataTransfer.get('text/uri-list');
-      if (external) {
-        const text = await external.asString();
-        sources = text
-          .split(/\r?\n/)
-          .map((s) => s.trim())
-          .filter((s) => s && !s.startsWith('#'))
-          .map((s) => {
-            try {
-              return vscode.Uri.parse(s);
-            } catch {
-              return undefined;
-            }
-          })
-          .filter((u): u is vscode.Uri => u !== undefined);
-      }
+    try {
+      sources = await readDropSources(dataTransfer);
+    } catch (error) {
+      vscode.window.showErrorMessage(`Failed to read dropped items: ${formatOpenError(error)}`);
+      return;
     }
     if (sources.length === 0) return;
 
@@ -170,7 +155,7 @@ export class ExplorerProvider
           await vscode.workspace.fs.rename(src, newUri, { overwrite: false });
         }
       } catch (e) {
-        vscode.window.showErrorMessage(`Failed to move ${name}: ${String(e)}`);
+        vscode.window.showErrorMessage(`Failed to move ${name}: ${formatOpenError(e)}`);
       }
     }
   }
@@ -414,6 +399,30 @@ export class ExplorerProvider
     }
     this.cache = { mode, matching, ancestors, deletedByParent };
   }
+}
+
+async function readDropSources(dataTransfer: vscode.DataTransfer): Promise<vscode.Uri[]> {
+  const internal = dataTransfer.get(INTERNAL_MIME);
+  if (internal) {
+    const value = internal.value;
+    return Array.isArray(value) ? value.filter((x): x is vscode.Uri => x instanceof vscode.Uri) : [];
+  }
+
+  const external = dataTransfer.get('text/uri-list');
+  if (!external) return [];
+  const text = await external.asString();
+  return text
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter((s) => s && !s.startsWith('#'))
+    .map((s) => {
+      try {
+        return vscode.Uri.parse(s);
+      } catch {
+        return undefined;
+      }
+    })
+    .filter((u): u is vscode.Uri => u !== undefined);
 }
 
 function nodeUri(node: FileTreeNode): vscode.Uri | undefined {

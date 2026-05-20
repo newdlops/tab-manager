@@ -58,7 +58,7 @@ export class GroupStore {
 
   getGroups(): UserGroup[] {
     if (!this.cachedGroups) {
-      this.cachedGroups = this.context.workspaceState.get<UserGroup[]>(GROUPS_KEY) ?? [];
+      this.cachedGroups = normalizeGroups(this.context.workspaceState.get<unknown>(GROUPS_KEY));
     }
     return this.cachedGroups;
   }
@@ -77,7 +77,7 @@ export class GroupStore {
   private async setGroups(groups: UserGroup[]): Promise<void> {
     this.cachedGroups = groups;
     this.cachedTabKeyToGroup = undefined;
-    await this.context.workspaceState.update(GROUPS_KEY, groups);
+    await this.persistWorkspaceState(GROUPS_KEY, groups);
     this._onDidChange.fire();
   }
 
@@ -164,10 +164,15 @@ export class GroupStore {
       typeof raw === 'object' &&
       'name' in raw &&
       'type' in raw &&
+      isNameSort((raw as Partial<SortState>).name) &&
       typeof (raw as SortState).type === 'boolean'
     ) {
       const partial = raw as Partial<SortState> & { name: NameSort; type: boolean };
-      this.cachedSortState = { readOnly: false, ...partial };
+      this.cachedSortState = {
+        name: partial.name,
+        type: partial.type,
+        readOnly: typeof partial.readOnly === 'boolean' ? partial.readOnly : false,
+      };
       return this.cachedSortState;
     }
     this.cachedSortState = DEFAULT_SORT;
@@ -178,21 +183,21 @@ export class GroupStore {
     const state = this.getSortState();
     if (state.name === name) return;
     this.cachedSortState = { ...state, name };
-    await this.context.workspaceState.update(SORT_KEY, this.cachedSortState);
+    await this.persistWorkspaceState(SORT_KEY, this.cachedSortState);
     this._onDidChange.fire();
   }
 
   async toggleTypeSort(): Promise<void> {
     const state = this.getSortState();
     this.cachedSortState = { ...state, type: !state.type };
-    await this.context.workspaceState.update(SORT_KEY, this.cachedSortState);
+    await this.persistWorkspaceState(SORT_KEY, this.cachedSortState);
     this._onDidChange.fire();
   }
 
   async toggleReadOnlySort(): Promise<void> {
     const state = this.getSortState();
     this.cachedSortState = { ...state, readOnly: !state.readOnly };
-    await this.context.workspaceState.update(SORT_KEY, this.cachedSortState);
+    await this.persistWorkspaceState(SORT_KEY, this.cachedSortState);
     this._onDidChange.fire();
   }
 
@@ -206,7 +211,7 @@ export class GroupStore {
   async setFilterMode(mode: FilterMode): Promise<void> {
     if (this.getFilterMode() === mode) return;
     this.cachedFilterMode = mode;
-    await this.context.workspaceState.update(FILTER_KEY, mode);
+    await this.persistWorkspaceState(FILTER_KEY, mode);
     this._onDidChange.fire();
   }
 
@@ -225,7 +230,48 @@ export class GroupStore {
   async setTabLayoutMode(mode: TabLayoutMode): Promise<void> {
     if (this.getTabLayoutMode() === mode) return;
     this.cachedTabLayoutMode = mode;
-    await this.context.workspaceState.update(TAB_LAYOUT_KEY, mode);
+    await this.persistWorkspaceState(TAB_LAYOUT_KEY, mode);
     this._onDidChange.fire();
   }
+
+  private async persistWorkspaceState(key: string, value: unknown): Promise<void> {
+    try {
+      await this.context.workspaceState.update(key, value);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      void vscode.window.showWarningMessage(
+        `Tab Manager could not save workspace state: ${message.replace(/^Error:\s*/, '')}`,
+      );
+    }
+  }
+}
+
+function normalizeGroups(raw: unknown): UserGroup[] {
+  if (!Array.isArray(raw)) return [];
+  const groups: UserGroup[] = [];
+  const seenIds = new Set<string>();
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const candidate = item as Partial<UserGroup>;
+    if (
+      typeof candidate.id !== 'string' ||
+      !candidate.id ||
+      typeof candidate.name !== 'string' ||
+      !Array.isArray(candidate.tabKeys) ||
+      seenIds.has(candidate.id)
+    ) {
+      continue;
+    }
+    seenIds.add(candidate.id);
+    groups.push({
+      id: candidate.id,
+      name: candidate.name,
+      tabKeys: [...new Set(candidate.tabKeys.filter((key): key is string => typeof key === 'string'))],
+    });
+  }
+  return groups;
+}
+
+function isNameSort(value: unknown): value is NameSort {
+  return value === 'none' || value === 'asc' || value === 'desc';
 }

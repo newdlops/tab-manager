@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { GroupStore, type FilterMode, type SortState, type TabLayoutMode } from './groupStore';
-import { openTab, resourceUriFor } from './tabUtils';
+import { findLiveTab, openTab, resourceUriFor } from './tabUtils';
 import { GroupNode, TabNode, TabTreeDataProvider } from './tabProvider';
 import { FilterSource } from './filterSource';
 import { ExplorerProvider } from './explorerProvider';
@@ -41,6 +41,31 @@ export function activate(context: vscode.ExtensionContext) {
     const sel = view.selection.filter((n): n is TabNode => n instanceof TabNode);
     if (sel.length > 0) return sel;
     return fallback ? [fallback] : [];
+  };
+  const liveTabsForNodes = (nodes: readonly TabNode[]): vscode.Tab[] => {
+    const tabs: vscode.Tab[] = [];
+    const seen = new Set<vscode.Tab>();
+    for (const node of nodes) {
+      const tab = findLiveTab(node.tab);
+      if (!tab) continue;
+      if (seen.has(tab)) continue;
+      seen.add(tab);
+      tabs.push(tab);
+    }
+    return tabs;
+  };
+  const closeTabNodes = async (nodes: readonly TabNode[]) => {
+    const tabs = liveTabsForNodes(nodes);
+    if (tabs.length === 0) {
+      provider.refresh();
+      return;
+    }
+    try {
+      await vscode.window.tabGroups.close(tabs, true);
+    } catch (e) {
+      provider.refresh();
+      vscode.window.showErrorMessage(`Failed to close tab${tabs.length === 1 ? '' : 's'}: ${String(e)}`);
+    }
   };
 
   let lastSortContext: SortState | undefined;
@@ -114,7 +139,10 @@ export function activate(context: vscode.ExtensionContext) {
       explorerProvider.refresh();
     }),
 
-    vscode.commands.registerCommand('tabManager.openTab', (node: TabNode) => openTab(node.tab)),
+    vscode.commands.registerCommand('tabManager.openTab', (node?: TabNode) => {
+      if (!node) return;
+      return openTab(node.tab);
+    }),
 
     vscode.commands.registerCommand('tabManager.explorer.revealActive', async () => {
       const uri = activeResourceUri();
@@ -136,19 +164,13 @@ export function activate(context: vscode.ExtensionContext) {
 
     vscode.commands.registerCommand('tabManager.closeTab', async (node: TabNode) => {
       const targets = selectedTabNodes(node);
-      await vscode.window.tabGroups.close(
-        targets.map((n) => n.tab),
-        true,
-      );
+      await closeTabNodes(targets);
     }),
 
     vscode.commands.registerCommand('tabManager.closeSelected', async () => {
       const targets = selectedTabNodes();
       if (targets.length === 0) return;
-      await vscode.window.tabGroups.close(
-        targets.map((n) => n.tab),
-        true,
-      );
+      await closeTabNodes(targets);
     }),
 
     vscode.commands.registerCommand('tabManager.createGroup', async () => {
@@ -158,7 +180,8 @@ export function activate(context: vscode.ExtensionContext) {
       await store.createGroup(trimmed);
     }),
 
-    vscode.commands.registerCommand('tabManager.renameGroup', async (node: GroupNode) => {
+    vscode.commands.registerCommand('tabManager.renameGroup', async (node?: GroupNode) => {
+      if (!node) return;
       const name = await vscode.window.showInputBox({
         prompt: 'Rename group',
         value: node.group.name,
@@ -168,7 +191,8 @@ export function activate(context: vscode.ExtensionContext) {
       await store.renameGroup(node.group.id, trimmed);
     }),
 
-    vscode.commands.registerCommand('tabManager.deleteGroup', async (node: GroupNode) => {
+    vscode.commands.registerCommand('tabManager.deleteGroup', async (node?: GroupNode) => {
+      if (!node) return;
       const pick = await vscode.window.showWarningMessage(
         `Delete group "${node.group.name}"? Tabs move to Ungrouped.`,
         { modal: true },
@@ -250,6 +274,18 @@ export function activate(context: vscode.ExtensionContext) {
     ),
     vscode.commands.registerCommand('tabManager.filter.clear', () => store.setFilterMode('none')),
   );
+
+  if (process.env.TAB_MANAGER_E2E === '1') {
+    return {
+      store,
+      tabProvider: provider,
+      explorerProvider,
+      filterSource,
+      context,
+      tabView: view,
+      explorerView: filesView,
+    };
+  }
 }
 
 function capitalize(s: FilterMode): string {

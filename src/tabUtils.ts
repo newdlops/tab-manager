@@ -194,6 +194,11 @@ export async function openTab(tab: vscode.Tab): Promise<void> {
   }
 }
 
+export function findLiveTab(tab: vscode.Tab): vscode.Tab | undefined {
+  const location = findLiveTabLocation(tab);
+  return location ? vscode.window.tabGroups.all[location.groupIndex]?.tabs[location.tabIndex] : undefined;
+}
+
 function canReopenTab(tab: vscode.Tab): boolean {
   const input = tab.input;
   return (

@@ -81,8 +81,13 @@ export function registerExplorerCommands(
     ),
 
     vscode.commands.registerCommand('tabManager.explorer.refresh', async () => {
-      await filterSource.refresh();
-      provider.refresh();
+      try {
+        await filterSource.refresh();
+      } catch (error) {
+        vscode.window.showErrorMessage(`Failed to refresh Explorer: ${formatOpenError(error)}`);
+      } finally {
+        provider.refresh();
+      }
     }),
 
     vscode.commands.registerCommand('tabManager.explorer.newFile', (node?: AnyNode) =>
@@ -110,12 +115,23 @@ export function registerExplorerCommands(
         });
         const trimmed = name?.trim();
         if (!trimmed || trimmed === current) return;
+        const validation = validateName(trimmed);
+        if (validation) {
+          vscode.window.showErrorMessage(validation);
+          return;
+        }
         const newUri = vscode.Uri.joinPath(parentUri(oldUri), trimmed);
         if (await exists(newUri)) {
           vscode.window.showErrorMessage(`"${trimmed}" already exists.`);
           return;
         }
-        await vscode.workspace.fs.rename(oldUri, newUri, { overwrite: false });
+        try {
+          await vscode.workspace.fs.rename(oldUri, newUri, { overwrite: false });
+        } catch (e) {
+          provider.invalidateDirectory(parentUri(oldUri));
+          provider.refresh();
+          vscode.window.showErrorMessage(`Failed to rename ${current}: ${formatOpenError(e)}`);
+        }
       },
     ),
 
@@ -146,7 +162,9 @@ export function registerExplorerCommands(
     vscode.commands.registerCommand('tabManager.explorer.copyPath', async (node?: AnyItem, items?: AnyItem[]) => {
       const uris = selectedUris(node, items);
       if (uris.length === 0) return;
-      await vscode.env.clipboard.writeText(uris.map((u) => u.fsPath).join('\n'));
+      await runOrShowError('Failed to copy path', () =>
+        vscode.env.clipboard.writeText(uris.map((u) => u.fsPath).join('\n')),
+      );
     }),
 
     vscode.commands.registerCommand(
@@ -154,8 +172,10 @@ export function registerExplorerCommands(
       async (node?: AnyItem, items?: AnyItem[]) => {
         const uris = selectedUris(node, items);
         if (uris.length === 0) return;
-        await vscode.env.clipboard.writeText(
-          uris.map((u) => vscode.workspace.asRelativePath(u, false)).join('\n'),
+        await runOrShowError('Failed to copy relative path', () =>
+          vscode.env.clipboard.writeText(
+            uris.map((u) => vscode.workspace.asRelativePath(u, false)).join('\n'),
+          ),
         );
       },
     ),
@@ -163,7 +183,9 @@ export function registerExplorerCommands(
     vscode.commands.registerCommand('tabManager.explorer.revealInOS', async (node?: AnyItem, items?: AnyItem[]) => {
       const uri = selectedUris(node, items)[0];
       if (!uri) return;
-      await vscode.commands.executeCommand('revealFileInOS', uri);
+      await runUriCommand(provider, uri, `Failed to reveal "${baseName(uri)}"`, () =>
+        vscode.commands.executeCommand('revealFileInOS', uri),
+      );
     }),
 
     vscode.commands.registerCommand(
@@ -171,11 +193,13 @@ export function registerExplorerCommands(
       async (node?: AnyNode) => {
         const uri = selectedUris(node)[0];
         if (!uri) return;
-        const terminal = vscode.window.createTerminal({
-          cwd: uri,
-          name: baseName(uri) || uri.fsPath,
+        await runUriCommand(provider, uri, `Failed to open terminal in "${baseName(uri)}"`, () => {
+          const terminal = vscode.window.createTerminal({
+            cwd: uri,
+            name: baseName(uri) || uri.fsPath,
+          });
+          terminal.show();
         });
-        terminal.show();
       },
     ),
 
@@ -191,7 +215,9 @@ export function registerExplorerCommands(
     vscode.commands.registerCommand('tabManager.explorer.openWith', async (node?: AnyItem, items?: AnyItem[]) => {
       const uri = selectedUris(node, items)[0];
       if (!uri) return;
-      await vscode.commands.executeCommand('explorer.openWith', uri);
+      await runUriCommand(provider, uri, `Failed to open "${baseName(uri)}" with another editor`, () =>
+        vscode.commands.executeCommand('explorer.openWith', uri),
+      );
     }),
 
     vscode.commands.registerCommand(
@@ -227,10 +253,12 @@ export function registerExplorerCommands(
         const uri = selectedUris(node)[0];
         if (!uri) return;
         const rel = vscode.workspace.asRelativePath(uri, false);
-        await vscode.commands.executeCommand('workbench.action.findInFiles', {
-          filesToInclude: rel,
-          triggerSearch: false,
-        });
+        await runUriCommand(provider, uri, `Failed to search in "${baseName(uri)}"`, () =>
+          vscode.commands.executeCommand('workbench.action.findInFiles', {
+            filesToInclude: rel,
+            triggerSearch: false,
+          }),
+        );
       },
     ),
 
@@ -257,6 +285,10 @@ export function registerExplorerCommands(
 
       for (const src of sources) {
         const name = baseName(src);
+        if (isSameOrAncestor(src, target)) {
+          vscode.window.showWarningMessage(`Cannot ${move ? 'move' : 'copy'} "${name}" into itself.`);
+          continue;
+        }
         let destUri = vscode.Uri.joinPath(target, name);
         if (src.toString() === destUri.toString()) {
           if (move) continue;
@@ -306,11 +338,18 @@ export function registerExplorerCommands(
       async (node?: AnyItem, items?: AnyItem[]) => {
         const right = selectedUris(node, items)[0];
         if (!right || !compareLeft) return;
-        await vscode.commands.executeCommand(
-          'vscode.diff',
-          compareLeft,
-          right,
-          `${baseName(compareLeft)} ↔ ${baseName(right)}`,
+        const left = compareLeft;
+        await runUriCommand(
+          provider,
+          [left, right],
+          `Failed to compare "${baseName(left)}" and "${baseName(right)}"`,
+          () =>
+            vscode.commands.executeCommand(
+              'vscode.diff',
+              left,
+              right,
+              `${baseName(left)} ↔ ${baseName(right)}`,
+            ),
         );
       },
     ),
@@ -323,11 +362,17 @@ export function registerExplorerCommands(
         vscode.window.showInformationMessage('Select exactly two files to compare.');
         return;
       }
-      await vscode.commands.executeCommand(
-        'vscode.diff',
-        uris[0],
-        uris[1],
-        `${baseName(uris[0])} ↔ ${baseName(uris[1])}`,
+      await runUriCommand(
+        provider,
+        uris,
+        `Failed to compare "${baseName(uris[0])}" and "${baseName(uris[1])}"`,
+        () =>
+          vscode.commands.executeCommand(
+            'vscode.diff',
+            uris[0],
+            uris[1],
+            `${baseName(uris[0])} ↔ ${baseName(uris[1])}`,
+          ),
       );
     }),
   );
@@ -345,6 +390,36 @@ async function openExplorerResource(
     provider.refresh();
     vscode.window.showErrorMessage(`Failed to open "${baseName(uri)}": ${formatOpenError(error)}`);
   }
+}
+
+async function runUriCommand(
+  provider: ExplorerProvider,
+  uris: vscode.Uri | readonly vscode.Uri[],
+  failureMessage: string,
+  run: () => unknown | Thenable<unknown>,
+): Promise<void> {
+  try {
+    await Promise.resolve(run());
+  } catch (error) {
+    invalidateUris(provider, Array.isArray(uris) ? uris : [uris]);
+    vscode.window.showErrorMessage(`${failureMessage}: ${formatOpenError(error)}`);
+  }
+}
+
+async function runOrShowError(
+  failureMessage: string,
+  run: () => unknown | Thenable<unknown>,
+): Promise<void> {
+  try {
+    await Promise.resolve(run());
+  } catch (error) {
+    vscode.window.showErrorMessage(`${failureMessage}: ${formatOpenError(error)}`);
+  }
+}
+
+function invalidateUris(provider: ExplorerProvider, uris: readonly vscode.Uri[]): void {
+  for (const uri of uris) provider.invalidateDirectory(parentUri(uri));
+  provider.refresh();
 }
 
 async function startInlineCreate(
@@ -438,6 +513,12 @@ function isModifiable(uri: vscode.Uri): boolean {
 
 function isVsixFile(uri: vscode.Uri): boolean {
   return uri.scheme === 'file' && isVsixFileName(baseName(uri));
+}
+
+function isSameOrAncestor(src: vscode.Uri, candidate: vscode.Uri): boolean {
+  const s = src.toString();
+  const c = candidate.toString();
+  return s === c || c.startsWith(s + '/');
 }
 
 async function exists(uri: vscode.Uri): Promise<boolean> {
