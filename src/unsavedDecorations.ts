@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import type { FilterSource } from './filterSource';
+import type { FilterSource, FilterSourceChangeEvent } from './filterSource';
 
 export class UnsavedDecorationProvider implements vscode.FileDecorationProvider, vscode.Disposable {
   private readonly _onDidChange = new vscode.EventEmitter<vscode.Uri | vscode.Uri[] | undefined>();
@@ -10,7 +10,12 @@ export class UnsavedDecorationProvider implements vscode.FileDecorationProvider,
 
   constructor(private readonly filter: FilterSource) {
     this.prevKeys = new Set(filter.getDirtyKeySet());
-    this.disposable = filter.onDidChange(() => this.fireDelta());
+    this.disposable = filter.onDidChange((event) => this.handleFilterChange(event));
+  }
+
+  private handleFilterChange(event: FilterSourceChangeEvent): void {
+    if (!event.affectsDirtyDecorations && !event.modes.includes('unsaved')) return;
+    this.fireDelta();
   }
 
   private fireDelta(): void {

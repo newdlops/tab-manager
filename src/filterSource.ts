@@ -59,8 +59,36 @@ const READONLY_SCHEMES: ReadonlySet<string> = new Set([
   'vscode-scm',
 ]);
 
+const ALL_FILTER_MODES: readonly ActiveFilterMode[] = [
+  'modified',
+  'untracked',
+  'deleted',
+  'errors',
+  'tabsOnly',
+  'unsaved',
+  'readOnly',
+];
+const GIT_FILTER_MODES: readonly ActiveFilterMode[] = [
+  'modified',
+  'untracked',
+  'deleted',
+];
+const TAB_STRUCTURE_FILTER_MODES: readonly ActiveFilterMode[] = [
+  'tabsOnly',
+  'untracked',
+  'readOnly',
+];
+
+type ActiveFilterMode = Exclude<FilterMode, 'none'>;
+
+export interface FilterSourceChangeEvent {
+  readonly modes: readonly ActiveFilterMode[];
+  readonly affectsOpenTabMetadata: boolean;
+  readonly affectsDirtyDecorations: boolean;
+}
+
 export class FilterSource implements vscode.Disposable {
-  private readonly _onDidChange = new vscode.EventEmitter<void>();
+  private readonly _onDidChange = new vscode.EventEmitter<FilterSourceChangeEvent>();
   readonly onDidChange = this._onDidChange.event;
 
   private git: GitAPI | undefined;
@@ -73,10 +101,13 @@ export class FilterSource implements vscode.Disposable {
   private dirtySetCache?: Set<string>;
   private readonly readOnlyCache = new Map<string, boolean>();
   private readonlyPopulationToken = 0;
+  private dirtySignature = '';
+  private readonly pendingModes = new Set<ActiveFilterMode>();
+  private pendingAffectsOpenTabMetadata = false;
+  private pendingAffectsDirtyDecorations = false;
 
   private readonly fireDebounced = debounce(() => {
-    this.invalidateCaches();
-    this._onDidChange.fire();
+    this.flushPendingChange();
   }, 50);
 
   private readonly schedulePopulateReadOnly = debounce(() => {
@@ -84,17 +115,12 @@ export class FilterSource implements vscode.Disposable {
   }, 80);
 
   constructor() {
+    this.dirtySignature = this.computeDirtySignature();
     this.disposables.push(
       this._onDidChange,
-      vscode.languages.onDidChangeDiagnostics(() => this.fireDebounced()),
-      vscode.window.tabGroups.onDidChangeTabs(() => {
-        this.fireDebounced();
-        this.schedulePopulateReadOnly();
-      }),
-      vscode.window.tabGroups.onDidChangeTabGroups(() => {
-        this.fireDebounced();
-        this.schedulePopulateReadOnly();
-      }),
+      vscode.languages.onDidChangeDiagnostics(() => this.queueChange(['errors'])),
+      vscode.window.tabGroups.onDidChangeTabs((event) => this.handleTabChange(event)),
+      vscode.window.tabGroups.onDidChangeTabGroups((event) => this.handleTabGroupChange(event)),
     );
     void this.bootstrapGit();
     this.schedulePopulateReadOnly();
@@ -112,14 +138,54 @@ export class FilterSource implements vscode.Disposable {
     }
     this.readOnlyCache.clear();
     this.invalidateCaches();
-    this._onDidChange.fire();
+    this._onDidChange.fire({
+      modes: ALL_FILTER_MODES,
+      affectsOpenTabMetadata: true,
+      affectsDirtyDecorations: true,
+    });
     this.schedulePopulateReadOnly();
   }
 
-  private invalidateCaches(): void {
-    this.uriCache.clear();
-    this.matchSetCache.clear();
-    this.dirtySetCache = undefined;
+  private queueChange(
+    modes: readonly ActiveFilterMode[],
+    options: {
+      affectsOpenTabMetadata?: boolean;
+      affectsDirtyDecorations?: boolean;
+    } = {},
+  ): void {
+    for (const mode of modes) this.pendingModes.add(mode);
+    this.pendingAffectsOpenTabMetadata ||= !!options.affectsOpenTabMetadata;
+    this.pendingAffectsDirtyDecorations ||= !!options.affectsDirtyDecorations;
+    this.fireDebounced();
+  }
+
+  private flushPendingChange(): void {
+    const modes = [...this.pendingModes];
+    const event: FilterSourceChangeEvent = {
+      modes,
+      affectsOpenTabMetadata: this.pendingAffectsOpenTabMetadata,
+      affectsDirtyDecorations: this.pendingAffectsDirtyDecorations,
+    };
+    this.pendingModes.clear();
+    this.pendingAffectsOpenTabMetadata = false;
+    this.pendingAffectsDirtyDecorations = false;
+    if (
+      event.modes.length === 0 &&
+      !event.affectsOpenTabMetadata &&
+      !event.affectsDirtyDecorations
+    ) {
+      return;
+    }
+    this.invalidateCaches(event.modes);
+    this._onDidChange.fire(event);
+  }
+
+  private invalidateCaches(modes: readonly ActiveFilterMode[] = ALL_FILTER_MODES): void {
+    for (const mode of modes) {
+      this.uriCache.delete(mode);
+      this.matchSetCache.delete(mode);
+      if (mode === 'unsaved') this.dirtySetCache = undefined;
+    }
   }
 
   isDirty(uri: vscode.Uri): boolean {
@@ -144,10 +210,12 @@ export class FilterSource implements vscode.Disposable {
     return isMissingWorkspaceFile(uri);
   }
 
-  notifyFileSystemChange(uri: vscode.Uri): void {
-    if (!this.hasOpenTabUri(uri)) return;
-    this.fireDebounced();
+  notifyFileSystemChange(uri: vscode.Uri): boolean {
+    if (!this.hasOpenTabUri(uri)) return false;
+    this.readOnlyCache.delete(uri.toString());
+    this.queueChange(['untracked', 'readOnly'], { affectsOpenTabMetadata: true });
     this.schedulePopulateReadOnly();
+    return true;
   }
 
   private async populateReadOnly(): Promise<void> {
@@ -191,10 +259,40 @@ export class FilterSource implements vscode.Disposable {
 
     if (token !== this.readonlyPopulationToken) return;
     if (changed) {
-      this.uriCache.delete('readOnly');
-      this.matchSetCache.delete('readOnly');
-      this._onDidChange.fire();
+      this.queueChange(['readOnly'], { affectsOpenTabMetadata: true });
     }
+  }
+
+  private handleTabChange(event: vscode.TabChangeEvent): void {
+    const structureChanged = event.opened.length > 0 || event.closed.length > 0;
+    if (structureChanged) {
+      this.queueChange(TAB_STRUCTURE_FILTER_MODES);
+      this.schedulePopulateReadOnly();
+    }
+    if (this.syncDirtySignature()) {
+      this.queueChange(['unsaved'], { affectsDirtyDecorations: true });
+    }
+  }
+
+  private handleTabGroupChange(event: vscode.TabGroupChangeEvent): void {
+    const structureChanged = event.opened.length > 0 || event.closed.length > 0;
+    if (!structureChanged) return;
+    this.queueChange(TAB_STRUCTURE_FILTER_MODES);
+    this.schedulePopulateReadOnly();
+  }
+
+  private syncDirtySignature(): boolean {
+    const next = this.computeDirtySignature();
+    if (next === this.dirtySignature) return false;
+    this.dirtySignature = next;
+    return true;
+  }
+
+  private computeDirtySignature(): string {
+    return this.computeDirtyUris()
+      .map((uri) => uri.toString())
+      .sort()
+      .join('\n');
   }
 
   private async statReadOnly(uri: vscode.Uri): Promise<boolean> {
@@ -266,19 +364,19 @@ export class FilterSource implements vscode.Disposable {
     this.disposables.push(
       api.onDidOpenRepository((r) => {
         this.attach(r);
-        this.fireDebounced();
+        this.queueChange(GIT_FILTER_MODES);
       }),
       api.onDidCloseRepository((r) => {
         this.detach(r);
-        this.fireDebounced();
+        this.queueChange(GIT_FILTER_MODES);
       }),
     );
-    this.fireDebounced();
+    this.queueChange(GIT_FILTER_MODES);
   }
 
   private attach(repo: Repository): void {
     if (this.repoDisposables.has(repo)) return;
-    const d = repo.state.onDidChange(() => this.fireDebounced());
+    const d = repo.state.onDidChange(() => this.queueChange(GIT_FILTER_MODES));
     this.repoDisposables.set(repo, d);
   }
 

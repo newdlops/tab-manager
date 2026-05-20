@@ -1,8 +1,8 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import type { GroupStore, FilterMode, SortState } from './groupStore';
-import type { FilterSource } from './filterSource';
-import { fileContextValue } from './util';
+import type { FilterSource, FilterSourceChangeEvent } from './filterSource';
+import { debounce, fileContextValue } from './util';
 
 export type FileTreeNode = WorkspaceFolderNode | DirectoryNode | FileNode | PendingNode;
 export type PendingKind = 'file' | 'folder';
@@ -72,7 +72,10 @@ export function parentUri(uri: vscode.Uri): vscode.Uri {
 const INTERNAL_MIME = 'application/vnd.code.tree.tabmanagerexplorer';
 
 export class ExplorerProvider
-  implements vscode.TreeDataProvider<FileTreeNode>, vscode.TreeDragAndDropController<FileTreeNode>
+  implements
+    vscode.TreeDataProvider<FileTreeNode>,
+    vscode.TreeDragAndDropController<FileTreeNode>,
+    vscode.Disposable
 {
   private readonly _onDidChangeTreeData = new vscode.EventEmitter<FileTreeNode | undefined>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
@@ -87,9 +90,11 @@ export class ExplorerProvider
     deletedByParent?: Map<string, vscode.Uri[]>;
   };
   private readonly dirCache = new Map<string, [string, vscode.FileType][]>();
+  private readonly directoryWatchers = new Map<string, vscode.FileSystemWatcher>();
   private pending?: { parentUri: vscode.Uri; kind: PendingKind; name: string };
   private lastFilterMode: FilterMode;
   private lastSortState: SortState;
+  private readonly fireWatchedDirectoryChange = debounce(() => this.requestRedraw(), 80);
 
   constructor(
     private readonly store: GroupStore,
@@ -98,7 +103,7 @@ export class ExplorerProvider
     this.lastFilterMode = store.getFilterMode();
     this.lastSortState = store.getSortState();
     store.onDidChange(() => this.refreshStoreState());
-    filter.onDidChange(() => this.refreshFilter());
+    filter.onDidChange((event) => this.refreshFilter(event));
   }
 
   handleDrag(
@@ -173,6 +178,7 @@ export class ExplorerProvider
   refresh(): void {
     this.cache = undefined;
     this.dirCache.clear();
+    this.disposeDirectoryWatchers();
     this._onDidChangeTreeData.fire(undefined);
   }
 
@@ -180,8 +186,12 @@ export class ExplorerProvider
     this._onDidChangeTreeData.fire(undefined);
   }
 
-  private refreshFilter(): void {
+  private refreshFilter(event?: FilterSourceChangeEvent): void {
+    const mode = this.store.getFilterMode();
+    if (event && (mode === 'none' || !event.modes.includes(mode))) return;
     this.cache = undefined;
+    this.dirCache.clear();
+    this.disposeDirectoryWatchers();
     this._onDidChangeTreeData.fire(undefined);
   }
 
@@ -198,8 +208,19 @@ export class ExplorerProvider
     else if (sortChanged) this.requestRedraw();
   }
 
-  invalidateDirectory(uri: vscode.Uri): void {
-    this.dirCache.delete(uri.toString());
+  invalidateDirectory(uri: vscode.Uri): boolean {
+    return this.dirCache.delete(uri.toString());
+  }
+
+  unwatchNode(node: FileTreeNode): void {
+    const uri = nodeUri(node);
+    if (!uri) return;
+    this.unwatchDirectoryTree(uri);
+  }
+
+  dispose(): void {
+    this.disposeDirectoryWatchers();
+    this._onDidChangeTreeData.dispose();
   }
 
   startPending(parentUri: vscode.Uri, kind: PendingKind): void {
@@ -291,6 +312,7 @@ export class ExplorerProvider
       }
       this.dirCache.set(cacheKey, entries);
     }
+    this.watchDirectory(folder);
 
     this.ensureCache(mode);
     const matching = this.cache!.matching;
@@ -321,6 +343,46 @@ export class ExplorerProvider
     }
 
     return nodes;
+  }
+
+  private watchDirectory(uri: vscode.Uri): void {
+    const key = uri.toString();
+    if (this.directoryWatchers.has(key)) return;
+    const watcher = vscode.workspace.createFileSystemWatcher(
+      new vscode.RelativePattern(uri, '*'),
+      false,
+      true,
+      false,
+    );
+    this.directoryWatchers.set(key, watcher);
+    watcher.onDidCreate((changedUri) => this.handleWatchedDirectoryChange(uri, changedUri));
+    watcher.onDidDelete((changedUri) => this.handleWatchedDirectoryChange(uri, changedUri));
+  }
+
+  private handleWatchedDirectoryChange(parent: vscode.Uri, uri: vscode.Uri): void {
+    const parentInvalidated = this.invalidateDirectory(parent);
+    const childInvalidated = this.invalidateDirectory(uri);
+    this.filter.notifyFileSystemChange(uri);
+    if (parentInvalidated || childInvalidated) this.fireWatchedDirectoryChange();
+  }
+
+  private unwatchDirectoryTree(uri: vscode.Uri): void {
+    for (const key of [...this.dirCache.keys()]) {
+      if (key === uri.toString() || isSameOrAncestor(uri, vscode.Uri.parse(key))) {
+        this.dirCache.delete(key);
+      }
+    }
+    for (const [key, watcher] of this.directoryWatchers) {
+      if (key === uri.toString() || isSameOrAncestor(uri, vscode.Uri.parse(key))) {
+        watcher.dispose();
+        this.directoryWatchers.delete(key);
+      }
+    }
+  }
+
+  private disposeDirectoryWatchers(): void {
+    for (const watcher of this.directoryWatchers.values()) watcher.dispose();
+    this.directoryWatchers.clear();
   }
 
   private ensureCache(mode: FilterMode): void {

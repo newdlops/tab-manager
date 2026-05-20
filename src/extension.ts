@@ -28,35 +28,12 @@ export function activate(context: vscode.ExtensionContext) {
   });
 
   const scheduleTabRefresh = debounce(() => provider.refresh(), 30);
-
-  // Watch only structural changes (create/delete). File-content changes do
-  // not affect the tree and would otherwise flood the extension during
-  // builds, npm installs, or watch tasks.
-  const fsWatcher = vscode.workspace.createFileSystemWatcher(
-    '**/*',
-    /* ignoreCreateEvents */ false,
-    /* ignoreChangeEvents */ true,
-    /* ignoreDeleteEvents */ false,
-  );
-  const pendingDirInvalidations = new Set<string>();
-  const flushExplorerRefresh = debounce(() => {
-    if (pendingDirInvalidations.size > 0) {
-      for (const dir of pendingDirInvalidations) {
-        explorerProvider.invalidateDirectory(vscode.Uri.parse(dir));
-      }
-      pendingDirInvalidations.clear();
-    }
-    explorerProvider.requestRedraw();
-  }, 80);
-  const onFsEvent = (uri: vscode.Uri) => {
-    const slash = uri.path.lastIndexOf('/');
-    const parent = uri.with({ path: slash > 0 ? uri.path.slice(0, slash) : '/' });
-    pendingDirInvalidations.add(parent.toString());
-    filterSource.notifyFileSystemChange(uri);
-    flushExplorerRefresh();
+  const scheduleTabRefreshForTabs = (event: vscode.TabChangeEvent) => {
+    if (event.opened.length > 0 || event.closed.length > 0) scheduleTabRefresh();
   };
-  fsWatcher.onDidCreate(onFsEvent);
-  fsWatcher.onDidDelete(onFsEvent);
+  const scheduleTabRefreshForGroups = (event: vscode.TabGroupChangeEvent) => {
+    if (event.opened.length > 0 || event.closed.length > 0) scheduleTabRefresh();
+  };
 
   registerExplorerCommands(context, explorerProvider, filesView, filterSource);
 
@@ -125,12 +102,13 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     view,
     filesView,
+    explorerProvider,
     filterSource,
     unsavedDecorations,
     vscode.window.registerFileDecorationProvider(unsavedDecorations),
-    fsWatcher,
-    vscode.window.tabGroups.onDidChangeTabs(() => scheduleTabRefresh()),
-    vscode.window.tabGroups.onDidChangeTabGroups(() => scheduleTabRefresh()),
+    vscode.window.tabGroups.onDidChangeTabs(scheduleTabRefreshForTabs),
+    vscode.window.tabGroups.onDidChangeTabGroups(scheduleTabRefreshForGroups),
+    filesView.onDidCollapseElement((event) => explorerProvider.unwatchNode(event.element)),
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
       syncExplorerTitle();
       explorerProvider.refresh();

@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import type { FilterMode, GroupStore, UserGroup } from './groupStore';
-import type { FilterSource } from './filterSource';
+import type { FilterSource, FilterSourceChangeEvent } from './filterSource';
 import {
   columnLabel,
   resourceUriFor,
@@ -131,7 +131,17 @@ export class TabTreeDataProvider implements vscode.TreeDataProvider<TabTreeNode>
     private readonly filter: FilterSource,
   ) {
     store.onDidChange(() => this.fireDebounced());
-    filter.onDidChange(() => this.invalidateAndFire());
+    filter.onDidChange((event) => this.handleFilterChange(event));
+  }
+
+  private handleFilterChange(event: FilterSourceChangeEvent): void {
+    const mode = this.store.getFilterMode();
+    const filterModeAffected = mode !== 'none' && event.modes.includes(mode);
+    const readOnlySortAffected =
+      this.store.getSortState().readOnly && event.modes.includes('readOnly');
+    if (filterModeAffected || readOnlySortAffected || event.affectsOpenTabMetadata) {
+      this.invalidateAndFire();
+    }
   }
 
   private invalidateAndFire(): void {
