@@ -22,6 +22,36 @@ interface ClipboardState {
   uris: vscode.Uri[];
 }
 
+interface GitExtension {
+  readonly enabled: boolean;
+  getAPI(version: 1): GitAPI;
+}
+
+interface GitAPI {
+  getRepository(uri: vscode.Uri): GitRepository | null;
+  toGitUri(uri: vscode.Uri, ref: string): vscode.Uri;
+}
+
+interface GitRepository {
+  getRefs(query: GitRefQuery): Promise<GitRef[]>;
+}
+
+interface GitRefQuery {
+  pattern: string;
+  includeCommitDetails?: boolean;
+  sort?: string;
+}
+
+interface GitRef {
+  name?: string;
+  commit?: string;
+  commitDetails?: {
+    message?: string;
+  };
+}
+
+type BranchPick = vscode.QuickPickItem & { ref: string };
+
 let clipboard: ClipboardState | undefined;
 let compareLeft: vscode.Uri | undefined;
 
@@ -375,7 +405,116 @@ export function registerExplorerCommands(
           ),
       );
     }),
+
+    vscode.commands.registerCommand(
+      'tabManager.explorer.compareWithBranch',
+      async (node?: AnyItem, items?: AnyItem[]) => {
+        const uri = selectedUris(node, items)[0];
+        if (!uri) return;
+        await compareWithBranch(provider, uri);
+      },
+    ),
   );
+}
+
+async function compareWithBranch(provider: ExplorerProvider, uri: vscode.Uri): Promise<void> {
+  await runUriCommand(
+    provider,
+    uri,
+    `Failed to compare "${baseName(uri)}" with branch`,
+    async () => {
+      const git = await getGitApi();
+      if (!git) return;
+
+      const repository = git.getRepository(uri);
+      if (!repository) {
+        vscode.window.showInformationMessage('This file is not inside a Git repository.');
+        return;
+      }
+
+      const picks = await getBranchPicks(repository);
+      if (picks.length === 0) {
+        vscode.window.showInformationMessage('No Git branches are available to compare.');
+        return;
+      }
+
+      const pick = await vscode.window.showQuickPick(picks, {
+        placeHolder: `Compare ${baseName(uri)} with branch`,
+      });
+      if (!pick) return;
+
+      const branchUri = git.toGitUri(uri, pick.ref);
+      await vscode.commands.executeCommand(
+        'vscode.diff',
+        branchUri,
+        uri,
+        `${baseName(uri)} (${pick.label}) ↔ Working Tree`,
+      );
+    },
+  );
+}
+
+async function getGitApi(): Promise<GitAPI | undefined> {
+  const extension = vscode.extensions.getExtension<GitExtension>('vscode.git');
+  if (!extension) {
+    vscode.window.showWarningMessage('The built-in Git extension is not available.');
+    return undefined;
+  }
+
+  const git = extension.isActive ? extension.exports : await extension.activate();
+  if (!git.enabled) {
+    vscode.window.showWarningMessage('The built-in Git extension is disabled.');
+    return undefined;
+  }
+
+  return git.getAPI(1);
+}
+
+async function getBranchPicks(repository: GitRepository): Promise<BranchPick[]> {
+  const [localRefs, remoteRefs] = await Promise.all([
+    repository.getRefs({
+      pattern: 'refs/heads',
+      includeCommitDetails: true,
+      sort: 'committerdate',
+    }),
+    repository.getRefs({
+      pattern: 'refs/remotes',
+      includeCommitDetails: true,
+      sort: 'committerdate',
+    }),
+  ]);
+
+  const seen = new Set<string>();
+  const picks: BranchPick[] = [];
+  for (const pick of [
+    ...localRefs.map((ref) => branchPick(ref, 'refs/heads', 'local branch')),
+    ...remoteRefs
+      .filter((ref) => ref.name && !ref.name.endsWith('/HEAD'))
+      .map((ref) => branchPick(ref, 'refs/remotes', 'remote branch')),
+  ]) {
+    if (!pick || seen.has(pick.ref)) continue;
+    seen.add(pick.ref);
+    picks.push(pick);
+  }
+  return picks;
+}
+
+function branchPick(
+  ref: GitRef,
+  prefix: 'refs/heads' | 'refs/remotes',
+  description: string,
+): BranchPick | undefined {
+  const name = ref.name ?? ref.commit;
+  if (!name) return undefined;
+  const detail = [ref.commit?.slice(0, 7), ref.commitDetails?.message?.split(/\r?\n/)[0]]
+    .filter((part): part is string => !!part)
+    .join(' · ');
+  return {
+    label: name,
+    description,
+    detail: detail || undefined,
+    ref: `${prefix}/${name}`,
+  };
 }
 
 async function openExplorerResource(

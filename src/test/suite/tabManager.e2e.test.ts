@@ -1,4 +1,5 @@
 import * as assert from 'assert';
+import * as childProcess from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
@@ -26,6 +27,11 @@ interface SortState {
   readOnly: boolean;
 }
 
+interface ExplorerDisplayOptions {
+  fileSize: boolean;
+  lineCount: boolean;
+}
+
 interface TestApi {
   context: vscode.ExtensionContext;
   store: {
@@ -34,6 +40,7 @@ interface TestApi {
     getSortState(): SortState;
     getFilterMode(): FilterMode;
     getTabLayoutMode(): 'byColumn' | 'merged';
+    getExplorerDisplayOptions(): ExplorerDisplayOptions;
   };
   tabProvider: {
     refresh(): void;
@@ -425,6 +432,8 @@ suite('Tab Manager E2E', () => {
     await vscode.commands.executeCommand('tabManager.sort.toggleType');
     await vscode.commands.executeCommand('tabManager.filter.tabsOnly');
     await vscode.commands.executeCommand('tabManager.layout.byColumn');
+    await vscode.commands.executeCommand('tabManager.explorer.toggleFileSize');
+    await vscode.commands.executeCommand('tabManager.explorer.toggleLineCount');
 
     let reloaded = new GroupStore(api.context);
     assert.deepStrictEqual(
@@ -434,6 +443,10 @@ suite('Tab Manager E2E', () => {
     assert.deepStrictEqual(reloaded.getSortState(), { name: 'desc', type: true, readOnly: false });
     assert.strictEqual(reloaded.getFilterMode(), 'tabsOnly');
     assert.strictEqual(reloaded.getTabLayoutMode(), 'byColumn');
+    assert.deepStrictEqual(reloaded.getExplorerDisplayOptions(), {
+      fileSize: true,
+      lineCount: true,
+    });
 
     await api.context.workspaceState.update('tabManager.groups', [
       null,
@@ -448,6 +461,10 @@ suite('Tab Manager E2E', () => {
     });
     await api.context.workspaceState.update('tabManager.filterMode', 'not-a-filter');
     await api.context.workspaceState.update('tabManager.tabLayoutMode', 'floating');
+    await api.context.workspaceState.update('tabManager.explorerDisplayOptions', {
+      fileSize: 'yes',
+      lineCount: 1,
+    });
 
     reloaded = new GroupStore(api.context);
     assert.deepStrictEqual(reloaded.getGroups(), [
@@ -456,6 +473,54 @@ suite('Tab Manager E2E', () => {
     assert.deepStrictEqual(reloaded.getSortState(), { name: 'none', type: false, readOnly: false });
     assert.strictEqual(reloaded.getFilterMode(), 'none');
     assert.strictEqual(reloaded.getTabLayoutMode(), 'byColumn');
+    assert.deepStrictEqual(reloaded.getExplorerDisplayOptions(), {
+      fileSize: false,
+      lineCount: false,
+    });
+  });
+
+  test('toggles explorer file metadata descriptions', async function () {
+    this.timeout(30_000);
+
+    const target = uri('metadata.txt');
+    fs.writeFileSync(target.fsPath, 'one\ntwo\n');
+
+    assert.deepStrictEqual(api.store.getExplorerDisplayOptions(), {
+      fileSize: false,
+      lineCount: false,
+    });
+    assert.strictEqual(description(await waitForExplorerNode(api, 'metadata.txt')), '');
+
+    await vscode.commands.executeCommand('tabManager.explorer.toggleFileSize');
+    assert.deepStrictEqual(api.store.getExplorerDisplayOptions(), {
+      fileSize: true,
+      lineCount: false,
+    });
+    assert.strictEqual(description(await waitForExplorerNode(api, 'metadata.txt')), '8 B');
+
+    await vscode.commands.executeCommand('tabManager.explorer.toggleLineCount');
+    assert.deepStrictEqual(api.store.getExplorerDisplayOptions(), {
+      fileSize: true,
+      lineCount: true,
+    });
+    assert.strictEqual(
+      description(await waitForExplorerNode(api, 'metadata.txt')),
+      '8 B · 2 lines',
+    );
+
+    await vscode.commands.executeCommand('tabManager.explorer.toggleFileSize');
+    assert.deepStrictEqual(api.store.getExplorerDisplayOptions(), {
+      fileSize: false,
+      lineCount: true,
+    });
+    assert.strictEqual(description(await waitForExplorerNode(api, 'metadata.txt')), '2 lines');
+
+    await vscode.commands.executeCommand('tabManager.explorer.toggleLineCount');
+    assert.deepStrictEqual(api.store.getExplorerDisplayOptions(), {
+      fileSize: false,
+      lineCount: false,
+    });
+    assert.strictEqual(description(await waitForExplorerNode(api, 'metadata.txt')), '');
   });
 
   test('toggles all filter commands and reflects real filter sources', async function () {
@@ -633,6 +698,45 @@ suite('Tab Manager E2E', () => {
       () => fs.existsSync(path.join(createdFolder.fsPath, 'drag-source.txt')),
       'drag/drop move behavior',
     );
+  });
+
+  test('compares an explorer file with a selected Git branch', async function () {
+    this.timeout(30_000);
+
+    const branchName = 'tab-manager-compare-base';
+    const target = uri('alpha.ts');
+    git(['branch', '-f', branchName, 'HEAD']);
+
+    let diffArgs: unknown[] | undefined;
+    try {
+      fs.writeFileSync(target.fsPath, 'export const alpha = 2;\n');
+
+      await withQuickPick(
+        (items) => items.find((item) => item.label === branchName),
+        () =>
+          withCommandStub(async (original, command, ...args) => {
+            if (command === 'vscode.diff') {
+              diffArgs = args;
+              return undefined;
+            }
+            return original(command, ...args);
+          }, (execute) =>
+            execute('tabManager.explorer.compareWithBranch', itemFor(target)),
+          ),
+      );
+    } finally {
+      fs.writeFileSync(target.fsPath, 'export const alpha = 1;\n');
+    }
+
+    assert.ok(diffArgs, 'Expected compare with branch to open a diff.');
+    const [left, right, title] = diffArgs as [vscode.Uri, vscode.Uri, string];
+    assert.strictEqual(left.scheme, 'git');
+    assert.strictEqual(right.toString(), target.toString());
+    assert.ok(title.includes(branchName), 'Expected diff title to include the selected branch.');
+
+    const query = JSON.parse(left.query) as { path: string; ref: string };
+    assert.strictEqual(query.path, target.fsPath);
+    assert.strictEqual(query.ref, `refs/heads/${branchName}`);
   });
 
   test('handles likely Explorer edge cases from a user workflow', async function () {
@@ -884,6 +988,14 @@ async function resetState(api: TestApi): Promise<void> {
   if (sort.type) await vscode.commands.executeCommand('tabManager.sort.toggleType');
   if (sort.readOnly) await vscode.commands.executeCommand('tabManager.sort.toggleReadOnly');
 
+  const explorerDisplay = api.store.getExplorerDisplayOptions();
+  if (explorerDisplay.fileSize) {
+    await vscode.commands.executeCommand('tabManager.explorer.toggleFileSize');
+  }
+  if (explorerDisplay.lineCount) {
+    await vscode.commands.executeCommand('tabManager.explorer.toggleLineCount');
+  }
+
   for (const group of [...api.store.getGroups()]) {
     await api.store.deleteGroup(group.id);
   }
@@ -894,6 +1006,20 @@ async function resetState(api: TestApi): Promise<void> {
 
 function uri(relativePath: string): vscode.Uri {
   return vscode.Uri.file(path.join(workspaceRoot, relativePath));
+}
+
+function git(args: string[]): void {
+  childProcess.execFileSync('git', args, {
+    cwd: workspaceRoot,
+    stdio: 'ignore',
+    env: {
+      ...process.env,
+      GIT_AUTHOR_NAME: 'Tab Manager E2E',
+      GIT_AUTHOR_EMAIL: 'tab-manager-e2e@example.com',
+      GIT_COMMITTER_NAME: 'Tab Manager E2E',
+      GIT_COMMITTER_EMAIL: 'tab-manager-e2e@example.com',
+    },
+  });
 }
 
 async function openFile(

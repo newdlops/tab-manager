@@ -8,6 +8,11 @@ export interface SortState {
   readOnly: boolean;
 }
 
+export interface ExplorerDisplayOptions {
+  fileSize: boolean;
+  lineCount: boolean;
+}
+
 export type TabLayoutMode = 'byColumn' | 'merged';
 
 export type FilterMode =
@@ -30,9 +35,11 @@ const GROUPS_KEY = 'tabManager.groups';
 const SORT_KEY = 'tabManager.sortState';
 const FILTER_KEY = 'tabManager.filterMode';
 const TAB_LAYOUT_KEY = 'tabManager.tabLayoutMode';
+const EXPLORER_DISPLAY_KEY = 'tabManager.explorerDisplayOptions';
 
 const DEFAULT_SORT: SortState = { name: 'none', type: false, readOnly: false };
 const DEFAULT_TAB_LAYOUT: TabLayoutMode = 'byColumn';
+const DEFAULT_EXPLORER_DISPLAY: ExplorerDisplayOptions = { fileSize: false, lineCount: false };
 const FILTER_MODES: readonly FilterMode[] = [
   'none',
   'modified',
@@ -53,6 +60,7 @@ export class GroupStore {
   private cachedSortState?: SortState;
   private cachedFilterMode?: FilterMode;
   private cachedTabLayoutMode?: TabLayoutMode;
+  private cachedExplorerDisplayOptions?: ExplorerDisplayOptions;
 
   constructor(private readonly context: vscode.ExtensionContext) {}
 
@@ -231,6 +239,39 @@ export class GroupStore {
     if (this.getTabLayoutMode() === mode) return;
     this.cachedTabLayoutMode = mode;
     await this.persistWorkspaceState(TAB_LAYOUT_KEY, mode);
+    this._onDidChange.fire();
+  }
+
+  getExplorerDisplayOptions(): ExplorerDisplayOptions {
+    if (this.cachedExplorerDisplayOptions) return this.cachedExplorerDisplayOptions;
+    const raw = this.context.workspaceState.get<unknown>(EXPLORER_DISPLAY_KEY);
+    if (
+      raw &&
+      typeof raw === 'object' &&
+      typeof (raw as Partial<ExplorerDisplayOptions>).fileSize === 'boolean' &&
+      typeof (raw as Partial<ExplorerDisplayOptions>).lineCount === 'boolean'
+    ) {
+      this.cachedExplorerDisplayOptions = {
+        fileSize: (raw as ExplorerDisplayOptions).fileSize,
+        lineCount: (raw as ExplorerDisplayOptions).lineCount,
+      };
+      return this.cachedExplorerDisplayOptions;
+    }
+    this.cachedExplorerDisplayOptions = DEFAULT_EXPLORER_DISPLAY;
+    return DEFAULT_EXPLORER_DISPLAY;
+  }
+
+  async toggleExplorerFileSize(): Promise<void> {
+    const options = this.getExplorerDisplayOptions();
+    this.cachedExplorerDisplayOptions = { ...options, fileSize: !options.fileSize };
+    await this.persistWorkspaceState(EXPLORER_DISPLAY_KEY, this.cachedExplorerDisplayOptions);
+    this._onDidChange.fire();
+  }
+
+  async toggleExplorerLineCount(): Promise<void> {
+    const options = this.getExplorerDisplayOptions();
+    this.cachedExplorerDisplayOptions = { ...options, lineCount: !options.lineCount };
+    await this.persistWorkspaceState(EXPLORER_DISPLAY_KEY, this.cachedExplorerDisplayOptions);
     this._onDidChange.fire();
   }
 

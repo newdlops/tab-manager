@@ -2,7 +2,7 @@
   "name": "tab-manager",
   "displayName": "Tab Manager",
   "description": "Group, filter, and sort open tabs and workspace files from the activity bar and Explorer.",
-  "version": "0.1.65",
+  "version": "0.1.66",
   "publisher": "newdlops",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -226,6 +226,16 @@
         "category": "Extended Explorer"
       },
       {
+        "command": "tabManager.explorer.toggleFileSize",
+        "title": "Show File Size",
+        "category": "Extended Explorer"
+      },
+      {
+        "command": "tabManager.explorer.toggleLineCount",
+        "title": "Show Line Count",
+        "category": "Extended Explorer"
+      },
+      {
         "command": "tabManager.explorer.rename",
         "title": "Rename...",
         "category": "Extended Explorer"
@@ -304,6 +314,11 @@
       {
         "command": "tabManager.explorer.compareSelected",
         "title": "Compare Selected",
+        "category": "Extended Explorer"
+      },
+      {
+        "command": "tabManager.explorer.compareWithBranch",
+        "title": "Compare This File with Branch...",
         "category": "Extended Explorer"
       }
     ],
@@ -423,6 +438,30 @@
           "command": "tabManager.filter.clear",
           "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.filterMode != 'none'",
           "group": "3_filter@6"
+        },
+        {
+          "command": "tabManager.explorer.toggleFileSize",
+          "title": "✓ Show File Size",
+          "when": "view == tabManagerExplorer && tabManager.explorerShowFileSize",
+          "group": "0_display@1"
+        },
+        {
+          "command": "tabManager.explorer.toggleFileSize",
+          "title": "Show File Size",
+          "when": "view == tabManagerExplorer && !tabManager.explorerShowFileSize",
+          "group": "0_display@1"
+        },
+        {
+          "command": "tabManager.explorer.toggleLineCount",
+          "title": "✓ Show Line Count",
+          "when": "view == tabManagerExplorer && tabManager.explorerShowLineCount",
+          "group": "0_display@2"
+        },
+        {
+          "command": "tabManager.explorer.toggleLineCount",
+          "title": "Show Line Count",
+          "when": "view == tabManagerExplorer && !tabManager.explorerShowLineCount",
+          "group": "0_display@2"
         },
         {
           "command": "tabManager.layout.byColumn",
@@ -689,6 +728,11 @@
           "command": "tabManager.explorer.compareSelected",
           "when": "view == tabManagerExplorer && viewItem =~ /^file\\.ext\\.[^.]+$/ && listMultiSelection",
           "group": "7_compare@3"
+        },
+        {
+          "command": "tabManager.explorer.compareWithBranch",
+          "when": "view == tabManagerExplorer && viewItem =~ /^file\\.ext\\.[^.]+$/ && config.git.enabled && !git.missing && gitOpenRepositoryCount != 0",
+          "group": "7_compare@4"
         },
         {
           "command": "tabManager.explorer.rename",

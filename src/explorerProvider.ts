@@ -1,12 +1,16 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
-import type { GroupStore, FilterMode, SortState } from './groupStore';
+import type { ExplorerDisplayOptions, GroupStore, FilterMode, SortState } from './groupStore';
 import type { FilterSource, FilterSourceChangeEvent } from './filterSource';
 import { formatOpenError } from './openResource';
 import { debounce, fileContextValue } from './util';
 
 export type FileTreeNode = WorkspaceFolderNode | DirectoryNode | FileNode | PendingNode;
 export type PendingKind = 'file' | 'folder';
+
+interface FileNodeMetadata {
+  descriptionParts?: readonly string[];
+}
 
 export class WorkspaceFolderNode extends vscode.TreeItem {
   constructor(public readonly folder: vscode.WorkspaceFolder) {
@@ -41,7 +45,11 @@ export class PendingNode extends vscode.TreeItem {
 }
 
 export class FileNode extends vscode.TreeItem {
-  constructor(public readonly uri: vscode.Uri, public readonly isDeleted = false) {
+  constructor(
+    public readonly uri: vscode.Uri,
+    public readonly isDeleted = false,
+    metadata: FileNodeMetadata = {},
+  ) {
     super(baseName(uri), vscode.TreeItemCollapsibleState.None);
     this.resourceUri = uri;
     this.id = `file:${isDeleted ? 'deleted:' : ''}${uri.toString()}`;
@@ -52,6 +60,9 @@ export class FileNode extends vscode.TreeItem {
     } else {
       this.contextValue = fileContextValue(baseName(uri));
       this.tooltip = uri.fsPath;
+      if (metadata.descriptionParts?.length) {
+        this.description = metadata.descriptionParts.join(' · ');
+      }
       this.command = {
         command: 'tabManager.explorer.open',
         title: 'Open',
@@ -72,6 +83,13 @@ export function parentUri(uri: vscode.Uri): vscode.Uri {
 
 const INTERNAL_MIME = 'application/vnd.code.tree.tabmanagerexplorer';
 
+interface CachedFileMetadata {
+  size: number;
+  mtime: number;
+  lineCount?: number;
+  lineCountComputed: boolean;
+}
+
 export class ExplorerProvider
   implements
     vscode.TreeDataProvider<FileTreeNode>,
@@ -91,10 +109,12 @@ export class ExplorerProvider
     deletedByParent?: Map<string, vscode.Uri[]>;
   };
   private readonly dirCache = new Map<string, [string, vscode.FileType][]>();
+  private readonly fileMetadataCache = new Map<string, CachedFileMetadata>();
   private readonly directoryWatchers = new Map<string, vscode.FileSystemWatcher>();
   private pending?: { parentUri: vscode.Uri; kind: PendingKind; name: string };
   private lastFilterMode: FilterMode;
   private lastSortState: SortState;
+  private lastExplorerDisplayOptions: ExplorerDisplayOptions;
   private readonly fireWatchedDirectoryChange = debounce(() => this.requestRedraw(), 80);
 
   constructor(
@@ -103,6 +123,7 @@ export class ExplorerProvider
   ) {
     this.lastFilterMode = store.getFilterMode();
     this.lastSortState = store.getSortState();
+    this.lastExplorerDisplayOptions = store.getExplorerDisplayOptions();
     store.onDidChange(() => this.refreshStoreState());
     filter.onDidChange((event) => this.refreshFilter(event));
   }
@@ -163,6 +184,7 @@ export class ExplorerProvider
   refresh(): void {
     this.cache = undefined;
     this.dirCache.clear();
+    this.fileMetadataCache.clear();
     this.disposeDirectoryWatchers();
     this._onDidChangeTreeData.fire(undefined);
   }
@@ -183,14 +205,19 @@ export class ExplorerProvider
   private refreshStoreState(): void {
     const mode = this.store.getFilterMode();
     const sort = this.store.getSortState();
+    const displayOptions = this.store.getExplorerDisplayOptions();
     const filterChanged = mode !== this.lastFilterMode;
     const sortChanged =
       sort.name !== this.lastSortState.name || sort.type !== this.lastSortState.type;
+    const displayChanged =
+      displayOptions.fileSize !== this.lastExplorerDisplayOptions.fileSize ||
+      displayOptions.lineCount !== this.lastExplorerDisplayOptions.lineCount;
     this.lastFilterMode = mode;
     this.lastSortState = sort;
+    this.lastExplorerDisplayOptions = displayOptions;
 
     if (filterChanged) this.refreshFilter();
-    else if (sortChanged) this.requestRedraw();
+    else if (sortChanged || displayChanged) this.requestRedraw();
   }
 
   invalidateDirectory(uri: vscode.Uri): boolean {
@@ -302,6 +329,7 @@ export class ExplorerProvider
     this.ensureCache(mode);
     const matching = this.cache!.matching;
     const ancestors = this.cache!.ancestors;
+    const displayOptions = this.store.getExplorerDisplayOptions();
 
     const nodes: FileTreeNode[] = [];
     for (const [name, type] of entries) {
@@ -312,7 +340,13 @@ export class ExplorerProvider
           nodes.push(new DirectoryNode(uri, this.isPendingAncestor(uri)));
         }
       } else if (type & vscode.FileType.File) {
-        if (mode === 'none' || matching.has(key)) nodes.push(new FileNode(uri));
+        if (mode === 'none' || matching.has(key)) {
+          nodes.push(
+            displayOptions.fileSize || displayOptions.lineCount
+              ? await this.createFileNode(uri, displayOptions)
+              : new FileNode(uri),
+          );
+        }
       }
     }
 
@@ -328,6 +362,51 @@ export class ExplorerProvider
     }
 
     return nodes;
+  }
+
+  private async createFileNode(
+    uri: vscode.Uri,
+    displayOptions: ExplorerDisplayOptions,
+  ): Promise<FileNode> {
+    const descriptionParts = await this.getFileDescriptionParts(uri, displayOptions);
+    return new FileNode(uri, false, { descriptionParts });
+  }
+
+  private async getFileDescriptionParts(
+    uri: vscode.Uri,
+    displayOptions: ExplorerDisplayOptions,
+  ): Promise<string[]> {
+    if (!displayOptions.fileSize && !displayOptions.lineCount) return [];
+
+    try {
+      const stat = await vscode.workspace.fs.stat(uri);
+      if (!(stat.type & vscode.FileType.File)) return [];
+
+      const key = uri.toString();
+      let metadata = this.fileMetadataCache.get(key);
+      if (!metadata || metadata.size !== stat.size || metadata.mtime !== stat.mtime) {
+        metadata = {
+          size: stat.size,
+          mtime: stat.mtime,
+          lineCountComputed: false,
+        };
+        this.fileMetadataCache.set(key, metadata);
+      }
+
+      if (displayOptions.lineCount && !metadata.lineCountComputed) {
+        metadata.lineCount = countLines(await vscode.workspace.fs.readFile(uri));
+        metadata.lineCountComputed = true;
+      }
+
+      const parts: string[] = [];
+      if (displayOptions.fileSize) parts.push(formatFileSize(metadata.size));
+      if (displayOptions.lineCount && metadata.lineCount !== undefined) {
+        parts.push(formatLineCount(metadata.lineCount));
+      }
+      return parts;
+    } catch {
+      return [];
+    }
   }
 
   private watchDirectory(uri: vscode.Uri): void {
@@ -399,6 +478,32 @@ export class ExplorerProvider
     }
     this.cache = { mode, matching, ancestors, deletedByParent };
   }
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let value = bytes / 1024;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex++;
+  }
+  const precision = value >= 10 ? 0 : 1;
+  return `${value.toFixed(precision)} ${units[unitIndex]}`;
+}
+
+function formatLineCount(lines: number): string {
+  return `${lines} line${lines === 1 ? '' : 's'}`;
+}
+
+function countLines(bytes: Uint8Array): number {
+  if (bytes.length === 0) return 0;
+  let lines = 0;
+  for (const byte of bytes) {
+    if (byte === 10) lines++;
+  }
+  return bytes[bytes.length - 1] === 10 ? lines : lines + 1;
 }
 
 async function readDropSources(dataTransfer: vscode.DataTransfer): Promise<vscode.Uri[]> {

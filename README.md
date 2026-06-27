@@ -27,8 +27,9 @@ A VS Code extension that brings grouping, filtering, and sorting to open tabs �
 - **Inline New File / New Folder** — a placeholder item appears inside the target folder and updates live as you type in the input box
 - **Deleted files** appear as ghost entries (greyed out, `deleted` label) when the Deleted filter is on
 - **Refresh** forces a `git status` rescan on every repository before refreshing
-- **Context menu**: Open / Open to Side / Reveal in File Explorer / Open in Integrated Terminal / Copy Path / Copy Relative Path / Rename / Delete / New File / New Folder
-- **Title bar**: New File, New Folder, Refresh, filter buttons, sort options
+- **Optional metadata** shows file size and line count next to file names
+- **Context menu**: Open / Open to Side / Reveal in File Explorer / Open in Integrated Terminal / Copy Path / Copy Relative Path / Compare This File with Branch / Rename / Delete / New File / New Folder
+- **Title bar**: New File, New Folder, Refresh, metadata toggles, filter buttons, sort options
 
 ### Filters
 
@@ -78,7 +79,7 @@ All commands are discoverable in the Command Palette under `Tab Manager:` / `Ext
 
 **Sort** — `Sort by Name (Ascending)`, `Sort by Name (Descending)`, `No Name Sort`, `Sort by Type`
 
-**Explorer** — `New File...`, `New Folder...`, `Refresh Explorer`, `Rename...`, `Delete`, `Copy Path`, `Copy Relative Path`, `Reveal in File Explorer`, `Open in Integrated Terminal`, `Open to the Side`
+**Explorer** — `New File...`, `New Folder...`, `Refresh Explorer`, `Show File Size`, `Show Line Count`, `Compare This File with Branch...`, `Rename...`, `Delete`, `Copy Path`, `Copy Relative Path`, `Reveal in File Explorer`, `Open in Integrated Terminal`, `Open to the Side`
 
 ## Known limitations
 

@@ -1,5 +1,11 @@
 import * as vscode from 'vscode';
-import { GroupStore, type FilterMode, type SortState, type TabLayoutMode } from './groupStore';
+import {
+  GroupStore,
+  type ExplorerDisplayOptions,
+  type FilterMode,
+  type SortState,
+  type TabLayoutMode,
+} from './groupStore';
 import { findLiveTab, openTab, resourceUriFor } from './tabUtils';
 import { GroupNode, TabNode, TabTreeDataProvider } from './tabProvider';
 import { FilterSource } from './filterSource';
@@ -71,6 +77,7 @@ export function activate(context: vscode.ExtensionContext) {
   let lastSortContext: SortState | undefined;
   let lastFilterContext: FilterMode | undefined;
   let lastLayoutContext: TabLayoutMode | undefined;
+  let lastExplorerDisplayContext: ExplorerDisplayOptions | undefined;
   const updateViewDescriptions = () => {
     const mode = store.getFilterMode();
     const layout = store.getTabLayoutMode();
@@ -111,6 +118,27 @@ export function activate(context: vscode.ExtensionContext) {
     }
     updateViewDescriptions();
   };
+  const syncExplorerDisplayState = () => {
+    const options = store.getExplorerDisplayOptions();
+    if (
+      lastExplorerDisplayContext &&
+      lastExplorerDisplayContext.fileSize === options.fileSize &&
+      lastExplorerDisplayContext.lineCount === options.lineCount
+    ) {
+      return;
+    }
+    lastExplorerDisplayContext = options;
+    vscode.commands.executeCommand(
+      'setContext',
+      'tabManager.explorerShowFileSize',
+      options.fileSize,
+    );
+    vscode.commands.executeCommand(
+      'setContext',
+      'tabManager.explorerShowLineCount',
+      options.lineCount,
+    );
+  };
   const syncExplorerTitle = () => {
     filesView.title = vscode.workspace.name ?? 'Workspace';
   };
@@ -118,10 +146,12 @@ export function activate(context: vscode.ExtensionContext) {
   syncSortContext();
   syncFilterState();
   syncLayoutState();
+  syncExplorerDisplayState();
   store.onDidChange(() => {
     syncSortContext();
     syncFilterState();
     syncLayoutState();
+    syncExplorerDisplayState();
   });
 
   context.subscriptions.push(
@@ -249,6 +279,12 @@ export function activate(context: vscode.ExtensionContext) {
     ),
     vscode.commands.registerCommand('tabManager.layout.merged', () =>
       store.setTabLayoutMode('merged'),
+    ),
+    vscode.commands.registerCommand('tabManager.explorer.toggleFileSize', () =>
+      store.toggleExplorerFileSize(),
+    ),
+    vscode.commands.registerCommand('tabManager.explorer.toggleLineCount', () =>
+      store.toggleExplorerLineCount(),
     ),
 
     vscode.commands.registerCommand('tabManager.filter.modified', () =>
