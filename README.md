@@ -6,6 +6,7 @@ A VS Code extension that brings grouping, filtering, and sorting to open tabs �
 
 - **Tab view** in the activity bar with user-defined groups, multi-select close, and sort
 - **Extended Explorer** in the Explorer sidebar with inline New File / New Folder, a live file-system watcher, and a deleted-file ghost view
+- **Projects** in the Explorer sidebar with saved project shortcuts that open in a new VS Code window
 - **Shared filter state**: one click toggles Modified / Untracked / Deleted / Errors / Open-Tabs-Only across both views
 - **Shared sort state**: by name (asc/desc) × by file extension, combinable
 - Performance: URI caches, WeakMap memoization, and debounced events keep the tree responsive during `git checkout`, mass saves, and rapid filter toggles
@@ -30,6 +31,13 @@ A VS Code extension that brings grouping, filtering, and sorting to open tabs �
 - **Optional metadata** shows file size and line count next to file names
 - **Context menu**: Open / Open to Side / Reveal in File Explorer / Open in Integrated Terminal / Copy Path / Copy Relative Path / Compare This File with Branch / Rename / Delete / New File / New Folder
 - **Title bar**: New File, New Folder, Refresh, metadata toggles, filter buttons, sort options
+
+### Projects (Explorer sidebar)
+
+- Saved project folders and `.code-workspace` files are listed in a separate Explorer section
+- Clicking a project opens it in a new VS Code window
+- Use the title-bar actions to add a folder or add the current workspace
+- Use the context menu to remove a saved project from the list
 
 ### Filters
 
@@ -81,6 +89,8 @@ All commands are discoverable in the Command Palette under `Tab Manager:` / `Ext
 
 **Explorer** — `New File...`, `New Folder...`, `Refresh Explorer`, `Show File Size`, `Show Line Count`, `Compare This File with Branch...`, `Rename...`, `Delete`, `Copy Path`, `Copy Relative Path`, `Reveal in File Explorer`, `Open in Integrated Terminal`, `Open to the Side`
 
+**Projects** — `Add Project Folder...`, `Add Current Workspace to Projects`, `Open Project in New Window`, `Remove Project`
+
 ## Known limitations
 
 - VS Code does not expose an API for inline editing in tree views. New File / New Folder uses a top-positioned input box synced live with a placeholder item in the tree — the closest approximation to the built-in Explorer's inline input
@@ -109,6 +119,7 @@ src/
   filterSource.ts       # git + diagnostics + open-tab URI source (Set cache + 50ms debounce)
   explorerProvider.ts   # hierarchical workspace tree with filter, pending-item, and dir cache
   explorerCommands.ts   # new/rename/delete/reveal/etc., inline-create UX
+  projectProvider.ts    # saved projects tree, global project store, and project commands
   tabProvider.ts        # open-tabs tree, groups, sort (debounced refresh)
   tabUtils.ts           # tab key/category/uri helpers (WeakMap-cached)
   util.ts               # debounce helper

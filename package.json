@@ -2,7 +2,7 @@
   "name": "tab-manager",
   "displayName": "Tab Manager",
   "description": "Group, filter, and sort open tabs and workspace files from the activity bar and Explorer.",
-  "version": "0.1.66",
+  "version": "0.1.6601",
   "publisher": "newdlops",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -62,6 +62,12 @@
           "name": "Workspace",
           "visibility": "visible",
           "order": 0
+        },
+        {
+          "id": "tabManagerProjects",
+          "name": "Projects",
+          "visibility": "visible",
+          "order": 1
         }
       ]
     },
@@ -74,6 +80,10 @@
         "view": "tabManagerExplorer",
         "contents": "No workspace folder is open.",
         "when": "workbenchState == empty"
+      },
+      {
+        "view": "tabManagerProjects",
+        "contents": "No projects saved."
       }
     ],
     "commands": [
@@ -320,6 +330,29 @@
         "command": "tabManager.explorer.compareWithBranch",
         "title": "Compare This File with Branch...",
         "category": "Extended Explorer"
+      },
+      {
+        "command": "tabManager.projects.open",
+        "title": "Open Project in New Window",
+        "category": "Projects"
+      },
+      {
+        "command": "tabManager.projects.addFolder",
+        "title": "Add Project Folder...",
+        "icon": "$(folder-opened)",
+        "category": "Projects"
+      },
+      {
+        "command": "tabManager.projects.addCurrentWorkspace",
+        "title": "Add Current Workspace to Projects",
+        "icon": "$(add)",
+        "category": "Projects"
+      },
+      {
+        "command": "tabManager.projects.remove",
+        "title": "Remove Project",
+        "icon": "$(trash)",
+        "category": "Projects"
       }
     ],
     "menus": {
@@ -363,6 +396,16 @@
           "command": "tabManager.explorer.refresh",
           "when": "view == tabManagerExplorer",
           "group": "navigation@4"
+        },
+        {
+          "command": "tabManager.projects.addFolder",
+          "when": "view == tabManagerProjects",
+          "group": "navigation@1"
+        },
+        {
+          "command": "tabManager.projects.addCurrentWorkspace",
+          "when": "view == tabManagerProjects && workbenchState != empty",
+          "group": "navigation@2"
         },
         {
           "command": "tabManager.filter.modified",
@@ -743,6 +786,16 @@
           "command": "tabManager.explorer.delete",
           "when": "view == tabManagerExplorer && viewItem =~ /^(file\\.ext\\.[^.]+|directory)$/",
           "group": "8_modify@2"
+        },
+        {
+          "command": "tabManager.projects.open",
+          "when": "view == tabManagerProjects && viewItem == project",
+          "group": "navigation@1"
+        },
+        {
+          "command": "tabManager.projects.remove",
+          "when": "view == tabManagerProjects && viewItem == project",
+          "group": "2_manage@1"
         }
       ]
     },

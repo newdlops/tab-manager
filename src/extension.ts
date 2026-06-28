@@ -11,6 +11,7 @@ import { GroupNode, TabNode, TabTreeDataProvider } from './tabProvider';
 import { FilterSource } from './filterSource';
 import { ExplorerProvider } from './explorerProvider';
 import { registerExplorerCommands } from './explorerCommands';
+import { ProjectProvider, ProjectStore, registerProjectCommands } from './projectProvider';
 import { UnsavedDecorationProvider } from './unsavedDecorations';
 import { debounce } from './util';
 
@@ -19,6 +20,8 @@ export function activate(context: vscode.ExtensionContext) {
   const filterSource = new FilterSource();
   const provider = new TabTreeDataProvider(store, filterSource);
   const explorerProvider = new ExplorerProvider(store, filterSource);
+  const projectStore = new ProjectStore(context);
+  const projectProvider = new ProjectProvider(projectStore);
   const unsavedDecorations = new UnsavedDecorationProvider(filterSource);
 
   const view = vscode.window.createTreeView('tabManagerView', {
@@ -32,6 +35,10 @@ export function activate(context: vscode.ExtensionContext) {
     canSelectMany: true,
     dragAndDropController: explorerProvider,
   });
+  const projectsView = vscode.window.createTreeView('tabManagerProjects', {
+    treeDataProvider: projectProvider,
+    canSelectMany: false,
+  });
 
   const scheduleTabRefresh = debounce(() => provider.refresh(), 30);
   const scheduleTabRefreshForTabs = (event: vscode.TabChangeEvent) => {
@@ -42,6 +49,7 @@ export function activate(context: vscode.ExtensionContext) {
   };
 
   registerExplorerCommands(context, explorerProvider, filesView, filterSource);
+  registerProjectCommands(context, projectStore, projectsView);
 
   const selectedTabNodes = (fallback?: TabNode): TabNode[] => {
     const sel = view.selection.filter((n): n is TabNode => n instanceof TabNode);
@@ -157,7 +165,10 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     view,
     filesView,
+    projectsView,
+    projectStore,
     explorerProvider,
+    projectProvider,
     filterSource,
     unsavedDecorations,
     vscode.window.registerFileDecorationProvider(unsavedDecorations),
@@ -316,10 +327,13 @@ export function activate(context: vscode.ExtensionContext) {
       store,
       tabProvider: provider,
       explorerProvider,
+      projectStore,
+      projectProvider,
       filterSource,
       context,
       tabView: view,
       explorerView: filesView,
+      projectsView,
     };
   }
 }
