@@ -676,6 +676,7 @@ suite('Tab Manager E2E', () => {
 
     await vscode.commands.executeCommand('tabManager.explorer.findInFolder', folderNode);
     await vscode.commands.executeCommand('tabManager.explorer.revealActive');
+    await vscode.commands.executeCommand('tabManager.explorer.expandAll');
     await vscode.commands.executeCommand('tabManager.explorer.refresh');
 
     const deleteTarget = uri('delete-command.tmp');

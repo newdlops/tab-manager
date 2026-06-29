@@ -18,6 +18,8 @@ import { isVsixFileName } from './util';
 type AnyNode = FileTreeNode;
 type AnyItem = vscode.TreeItem;
 
+const MAX_EXPAND_ALL_DIRECTORIES = 1000;
+
 interface ClipboardState {
   mode: 'cut' | 'copy';
   uris: vscode.Uri[];
@@ -124,6 +126,10 @@ export function registerExplorerCommands(
         provider.refresh();
       }
     }),
+
+    vscode.commands.registerCommand('tabManager.explorer.expandAll', () =>
+      expandAll(provider, filesView),
+    ),
 
     vscode.commands.registerCommand('tabManager.explorer.newFile', (node?: AnyNode) =>
       startInlineCreate(provider, filesView, node, 'file'),
@@ -422,6 +428,56 @@ export function registerExplorerCommands(
   );
 }
 
+async function expandAll(
+  provider: ExplorerProvider,
+  filesView: vscode.TreeView<FileTreeNode>,
+): Promise<void> {
+  let hitLimit = false;
+
+  await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: 'Expanding Explorer',
+      cancellable: true,
+    },
+    async (progress, token) => {
+      const stack = [...(await provider.getChildren(undefined))].reverse();
+      let expanded = 0;
+
+      while (stack.length > 0 && !token.isCancellationRequested) {
+        const node = stack.pop()!;
+        if (!isContainerNode(node)) continue;
+        if (expanded >= MAX_EXPAND_ALL_DIRECTORIES) {
+          hitLimit = true;
+          break;
+        }
+
+        try {
+          await filesView.reveal(node, { expand: true, select: false, focus: false });
+          expanded++;
+          if (expanded === 1 || expanded % 50 === 0) {
+            progress.report({ message: `${expanded} folders` });
+          }
+        } catch {
+          continue;
+        }
+
+        const children = await provider.getChildren(node);
+        for (let i = children.length - 1; i >= 0; i--) {
+          const child = children[i];
+          if (isContainerNode(child)) stack.push(child);
+        }
+      }
+    },
+  );
+
+  if (hitLimit) {
+    vscode.window.showWarningMessage(
+      `Stopped after expanding ${MAX_EXPAND_ALL_DIRECTORIES} folders to keep VS Code responsive.`,
+    );
+  }
+}
+
 async function compareWithBranch(provider: ExplorerProvider, uri: vscode.Uri): Promise<void> {
   await runUriCommand(
     provider,
@@ -648,6 +704,10 @@ function uriOf(node: AnyItem | undefined): vscode.Uri | undefined {
   if (node instanceof DirectoryNode) return node.uri;
   if (node instanceof FileNode) return node.uri;
   return node.resourceUri;
+}
+
+function isContainerNode(node: FileTreeNode): node is WorkspaceFolderNode | DirectoryNode {
+  return node instanceof WorkspaceFolderNode || node instanceof DirectoryNode;
 }
 
 function isModifiable(uri: vscode.Uri): boolean {

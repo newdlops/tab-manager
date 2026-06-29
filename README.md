@@ -87,7 +87,7 @@ All commands are discoverable in the Command Palette under `Tab Manager:` / `Ext
 
 **Sort** — `Sort by Name (Ascending)`, `Sort by Name (Descending)`, `No Name Sort`, `Sort by Type`
 
-**Explorer** — `New File...`, `New Folder...`, `Refresh Explorer`, `Show File Size`, `Show Line Count`, `Compare This File with Branch...`, `Rename...`, `Delete`, `Copy Path`, `Copy Relative Path`, `Reveal in File Explorer`, `Open in Integrated Terminal`, `Open to the Side`
+**Explorer** — `New File...`, `New Folder...`, `Expand All`, `Refresh Explorer`, `Show File Size`, `Show Line Count`, `Compare This File with Branch...`, `Rename...`, `Delete`, `Copy Path`, `Copy Relative Path`, `Reveal in File Explorer`, `Open in Integrated Terminal`, `Open to the Side`
 
 **Projects** — `Add Project Folder...`, `Add Current Workspace to Projects`, `Open Project in New Window`, `Remove Project`
 
