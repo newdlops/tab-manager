@@ -411,19 +411,19 @@
           "group": "navigation@3"
         },
         {
-          "command": "tabManager.explorer.expandAll",
+          "command": "tabManager.explorer.refresh",
           "when": "view == tabManagerExplorer",
           "group": "navigation@4"
         },
         {
-          "command": "tabManager.explorer.refresh",
+          "command": "tabManager.explorer.refreshPullRequestComments",
           "when": "view == tabManagerExplorer",
           "group": "navigation@5"
         },
         {
-          "command": "tabManager.explorer.refreshPullRequestComments",
+          "command": "tabManager.explorer.expandAll",
           "when": "view == tabManagerExplorer",
-          "group": "navigation@6"
+          "group": "navigation@99"
         },
         {
           "command": "tabManager.projects.addFolder",
