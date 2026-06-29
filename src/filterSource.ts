@@ -67,6 +67,7 @@ const ALL_FILTER_MODES: readonly ActiveFilterMode[] = [
   'tabsOnly',
   'unsaved',
   'readOnly',
+  'prComments',
 ];
 const GIT_FILTER_MODES: readonly ActiveFilterMode[] = [
   'modified',
@@ -81,6 +82,11 @@ const TAB_STRUCTURE_FILTER_MODES: readonly ActiveFilterMode[] = [
 
 type ActiveFilterMode = Exclude<FilterMode, 'none'>;
 
+export interface CommentedFileSource {
+  readonly onDidChangeCommentedFiles: vscode.Event<void>;
+  getCommentedUris(): readonly vscode.Uri[];
+}
+
 export interface FilterSourceChangeEvent {
   readonly modes: readonly ActiveFilterMode[];
   readonly affectsOpenTabMetadata: boolean;
@@ -94,6 +100,8 @@ export class FilterSource implements vscode.Disposable {
   private git: GitAPI | undefined;
   private readonly repoDisposables = new Map<Repository, vscode.Disposable>();
   private readonly disposables: vscode.Disposable[] = [];
+  private commentedFileSource: CommentedFileSource | undefined;
+  private commentedFileSourceDisposable: vscode.Disposable | undefined;
 
   private readonly uriCache = new Map<FilterMode, vscode.Uri[]>();
   private readonly matchSetCache = new Map<FilterMode, Set<string>>();
@@ -114,7 +122,7 @@ export class FilterSource implements vscode.Disposable {
     void this.populateReadOnly();
   }, 80);
 
-  constructor() {
+  constructor(commentedFileSource?: CommentedFileSource) {
     this.dirtySignature = this.computeDirtySignature();
     this.disposables.push(
       this._onDidChange,
@@ -122,8 +130,18 @@ export class FilterSource implements vscode.Disposable {
       vscode.window.tabGroups.onDidChangeTabs((event) => this.handleTabChange(event)),
       vscode.window.tabGroups.onDidChangeTabGroups((event) => this.handleTabGroupChange(event)),
     );
+    if (commentedFileSource) this.setCommentedFileSource(commentedFileSource);
     void this.bootstrapGit();
     this.schedulePopulateReadOnly();
+  }
+
+  setCommentedFileSource(source: CommentedFileSource | undefined): void {
+    this.commentedFileSourceDisposable?.dispose();
+    this.commentedFileSource = source;
+    this.commentedFileSourceDisposable = source?.onDidChangeCommentedFiles(() =>
+      this.queueChange(['prComments']),
+    );
+    this.queueChange(['prComments']);
   }
 
   async refresh(): Promise<void> {
@@ -434,6 +452,9 @@ export class FilterSource implements vscode.Disposable {
     if (mode === 'unsaved') {
       return this.computeDirtyUris();
     }
+    if (mode === 'prComments') {
+      return [...(this.commentedFileSource?.getCommentedUris() ?? [])];
+    }
     if (mode === 'readOnly') {
       const seen = new Set<string>();
       const uris: vscode.Uri[] = [];
@@ -474,6 +495,7 @@ export class FilterSource implements vscode.Disposable {
   }
 
   dispose(): void {
+    this.commentedFileSourceDisposable?.dispose();
     for (const d of this.repoDisposables.values()) d.dispose();
     this.repoDisposables.clear();
     for (const d of this.disposables) d.dispose();

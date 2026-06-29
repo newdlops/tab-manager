@@ -12,12 +12,14 @@ import { FilterSource } from './filterSource';
 import { ExplorerProvider } from './explorerProvider';
 import { registerExplorerCommands } from './explorerCommands';
 import { ProjectProvider, ProjectStore, registerProjectCommands } from './projectProvider';
+import { PullRequestCommentDecorationProvider } from './pullRequestComments';
 import { UnsavedDecorationProvider } from './unsavedDecorations';
 import { debounce } from './util';
 
 export function activate(context: vscode.ExtensionContext) {
   const store = new GroupStore(context);
-  const filterSource = new FilterSource();
+  const pullRequestCommentDecorations = new PullRequestCommentDecorationProvider();
+  const filterSource = new FilterSource(pullRequestCommentDecorations);
   const provider = new TabTreeDataProvider(store, filterSource);
   const explorerProvider = new ExplorerProvider(store, filterSource);
   const projectStore = new ProjectStore(context);
@@ -48,7 +50,13 @@ export function activate(context: vscode.ExtensionContext) {
     if (event.opened.length > 0 || event.closed.length > 0) scheduleTabRefresh();
   };
 
-  registerExplorerCommands(context, explorerProvider, filesView, filterSource);
+  registerExplorerCommands(
+    context,
+    explorerProvider,
+    filesView,
+    filterSource,
+    pullRequestCommentDecorations,
+  );
   registerProjectCommands(context, projectStore, projectsView);
 
   const selectedTabNodes = (fallback?: TabNode): TabNode[] => {
@@ -171,7 +179,9 @@ export function activate(context: vscode.ExtensionContext) {
     projectProvider,
     filterSource,
     unsavedDecorations,
+    pullRequestCommentDecorations,
     vscode.window.registerFileDecorationProvider(unsavedDecorations),
+    vscode.window.registerFileDecorationProvider(pullRequestCommentDecorations),
     vscode.window.tabGroups.onDidChangeTabs(scheduleTabRefreshForTabs),
     vscode.window.tabGroups.onDidChangeTabGroups(scheduleTabRefreshForGroups),
     filesView.onDidCollapseElement((event) => explorerProvider.unwatchNode(event.element)),
@@ -297,6 +307,9 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('tabManager.explorer.toggleLineCount', () =>
       store.toggleExplorerLineCount(),
     ),
+    vscode.commands.registerCommand('tabManager.explorer.refreshPullRequestComments', () =>
+      pullRequestCommentDecorations.refresh({ createSession: true, showStatus: true }),
+    ),
 
     vscode.commands.registerCommand('tabManager.filter.modified', () =>
       store.toggleFilterMode('modified'),
@@ -319,6 +332,9 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('tabManager.filter.readOnly', () =>
       store.toggleFilterMode('readOnly'),
     ),
+    vscode.commands.registerCommand('tabManager.filter.prComments', () =>
+      store.toggleFilterMode('prComments'),
+    ),
     vscode.commands.registerCommand('tabManager.filter.clear', () => store.setFilterMode('none')),
   );
 
@@ -330,6 +346,7 @@ export function activate(context: vscode.ExtensionContext) {
       projectStore,
       projectProvider,
       filterSource,
+      pullRequestCommentDecorations,
       context,
       tabView: view,
       explorerView: filesView,
@@ -346,6 +363,8 @@ function capitalize(s: FilterMode): string {
       return 'Unsaved';
     case 'readOnly':
       return 'Read-only';
+    case 'prComments':
+      return 'PR Comments';
     default:
       return s.charAt(0).toUpperCase() + s.slice(1);
   }

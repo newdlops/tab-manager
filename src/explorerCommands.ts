@@ -12,6 +12,7 @@ import {
 } from './explorerProvider';
 import type { FilterSource } from './filterSource';
 import { formatOpenError, openResource } from './openResource';
+import type { PullRequestCommentDecorationProvider } from './pullRequestComments';
 import { isVsixFileName } from './util';
 
 type AnyNode = FileTreeNode;
@@ -60,6 +61,7 @@ export function registerExplorerCommands(
   provider: ExplorerProvider,
   filesView: vscode.TreeView<FileTreeNode>,
   filterSource: FilterSource,
+  pullRequestComments?: PullRequestCommentDecorationProvider,
 ): void {
   const selectedItems = (
     fallback?: AnyItem,
@@ -112,7 +114,10 @@ export function registerExplorerCommands(
 
     vscode.commands.registerCommand('tabManager.explorer.refresh', async () => {
       try {
-        await filterSource.refresh();
+        await Promise.all([
+          filterSource.refresh(),
+          pullRequestComments?.refresh({ createSession: false }),
+        ]);
       } catch (error) {
         vscode.window.showErrorMessage(`Failed to refresh Explorer: ${formatOpenError(error)}`);
       } finally {

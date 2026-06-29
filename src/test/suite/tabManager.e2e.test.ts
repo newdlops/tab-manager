@@ -13,7 +13,8 @@ type FilterMode =
   | 'errors'
   | 'tabsOnly'
   | 'unsaved'
-  | 'readOnly';
+  | 'readOnly'
+  | 'prComments';
 
 interface UserGroup {
   id: string;
@@ -534,6 +535,7 @@ suite('Tab Manager E2E', () => {
       ['tabsOnly', 'tabManager.filter.tabsOnly'],
       ['unsaved', 'tabManager.filter.unsaved'],
       ['readOnly', 'tabManager.filter.readOnly'],
+      ['prComments', 'tabManager.filter.prComments'],
     ];
 
     for (const [mode, command] of modes) {
