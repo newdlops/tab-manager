@@ -77,6 +77,10 @@ interface GithubPullRequestComment {
   readonly path?: unknown;
 }
 
+type GithubPullRequestLookupState = 'open' | 'closed';
+
+const PULL_REQUEST_LOOKUP_STATES: readonly GithubPullRequestLookupState[] = ['open', 'closed'];
+
 class GithubHttpError extends Error {
   constructor(
     readonly statusCode: number,
@@ -139,7 +143,7 @@ export class PullRequestCommentDecorationProvider
         this.applyDecorations(new Map(), token);
         if (options.showStatus) {
           void vscode.window.showInformationMessage(
-            'No open GitHub pull request found for the current branch.',
+            'No GitHub pull request found for the current branch.',
           );
         }
         return;
@@ -269,24 +273,27 @@ export class PullRequestCommentDecorationProvider
     context: PullRequestLookupContext,
     accessToken: string | undefined,
   ): Promise<PullRequestSummary | undefined> {
-    for (const base of context.baseRemotes) {
-      for (const head of context.headRemotes) {
-        try {
-          const pullRequest = await readOpenPullRequest(
-            base,
-            head.owner,
-            context.branchName,
-            accessToken,
-          );
-          if (pullRequest) return pullRequest;
-        } catch (error) {
-          if (
-            error instanceof GithubHttpError &&
-            (error.statusCode === 404 || error.statusCode === 422)
-          ) {
-            continue;
+    for (const state of PULL_REQUEST_LOOKUP_STATES) {
+      for (const base of context.baseRemotes) {
+        for (const head of context.headRemotes) {
+          try {
+            const pullRequest = await readPullRequestForBranch(
+              base,
+              head.owner,
+              context.branchName,
+              state,
+              accessToken,
+            );
+            if (pullRequest) return pullRequest;
+          } catch (error) {
+            if (
+              error instanceof GithubHttpError &&
+              (error.statusCode === 404 || error.statusCode === 422)
+            ) {
+              continue;
+            }
+            throw error;
           }
-          throw error;
         }
       }
     }
@@ -335,17 +342,20 @@ async function getGithubAccessToken(createSession: boolean): Promise<string | un
   }
 }
 
-async function readOpenPullRequest(
+async function readPullRequestForBranch(
   base: GithubRemote,
   headOwner: string,
   branchName: string,
+  state: GithubPullRequestLookupState,
   accessToken: string | undefined,
 ): Promise<PullRequestSummary | undefined> {
   const url = githubApiUrl(
     `/repos/${encodePathPart(base.owner)}/${encodePathPart(base.repo)}/pulls`,
     {
-      state: 'open',
+      state,
       head: `${headOwner}:${branchName}`,
+      sort: 'created',
+      direction: 'desc',
       per_page: '1',
     },
   );
