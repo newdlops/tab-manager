@@ -2,6 +2,13 @@
 
 All notable changes are documented here.
 
+## [0.1.6605]
+
+### Extended Explorer
+- Cut / Copy / Paste now integrates with the native OS clipboard. Files copied in Finder (macOS), File Explorer (Windows), a Linux file manager, or another VS Code window can be pasted into the Extended Explorer, and files copied here can be pasted into those apps
+- `Paste` (`Ctrl/Cmd+V`) is available whenever the Extended Explorer is focused — the internal clipboard still takes priority, but a newer external selection supersedes it
+- Falls back gracefully to the previous internal-only Cut / Copy / Paste when the platform clipboard tools are unavailable
+
 ## [0.1.0]
 
 Initial public release.

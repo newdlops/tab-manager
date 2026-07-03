@@ -828,6 +828,49 @@ suite('Tab Manager E2E', () => {
     assert.ok(!fs.existsSync(path.join(child.fsPath, 'parent')));
   });
 
+  test('pastes files placed on the OS clipboard by another application', async function () {
+    this.timeout(20_000);
+    const { writeClipboardFileUris, readClipboardFileUris } = await import('../../osClipboard.js');
+
+    const base = uri('os-clip');
+    fs.mkdirSync(base.fsPath, { recursive: true });
+    const probe = uri('os-clip/probe.txt');
+    fs.writeFileSync(probe.fsPath, 'probe\n');
+
+    // The native OS clipboard is unavailable in some headless environments; the
+    // feature degrades gracefully there, so skip rather than fail.
+    const wrote = await writeClipboardFileUris([probe]);
+    const readBack = await readClipboardFileUris();
+    if (!wrote || !readBack.some((u) => path.basename(u.fsPath) === 'probe.txt')) {
+      this.skip();
+      return;
+    }
+
+    // An internal copy is on the clipboard, but a newer external selection —
+    // simulating a copy from Finder / Explorer / another window — must win.
+    const internal = uri('os-clip/internal.txt');
+    fs.writeFileSync(internal.fsPath, 'internal\n');
+    const external = uri('os-clip/external.txt');
+    fs.writeFileSync(external.fsPath, 'from another app\n');
+    const targetDir = uri('os-clip/target');
+    fs.mkdirSync(targetDir.fsPath, { recursive: true });
+    api.explorerProvider.refresh();
+
+    await vscode.commands.executeCommand('tabManager.explorer.copy', itemFor(internal));
+    await writeClipboardFileUris([external]);
+
+    const targetNode = await waitForExplorerNode(api, 'target', base);
+    await vscode.commands.executeCommand('tabManager.explorer.paste', targetNode);
+
+    const pasted = path.join(targetDir.fsPath, 'external.txt');
+    await waitFor(() => fs.existsSync(pasted), 'external OS clipboard paste');
+    assert.strictEqual(fs.readFileSync(pasted, 'utf8'), 'from another app\n');
+    assert.ok(
+      !fs.existsSync(path.join(targetDir.fsPath, 'internal.txt')),
+      'A newer external selection should supersede the internal clipboard.',
+    );
+  });
+
   test('turns delegated VS Code command failures into handled Explorer errors', async function () {
     this.timeout(30_000);
     const alpha = itemFor(uri('alpha.ts'));

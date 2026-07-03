@@ -2,7 +2,7 @@
   "name": "tab-manager",
   "displayName": "Tab Manager",
   "description": "Group, filter, and sort open tabs and workspace files from the activity bar and Explorer.",
-  "version": "0.1.6604",
+  "version": "0.1.6605",
   "publisher": "newdlops",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -784,7 +784,7 @@
         },
         {
           "command": "tabManager.explorer.paste",
-          "when": "view == tabManagerExplorer && viewItem =~ /^(directory|workspaceFolder)$/ && tabManager.explorerHasClipboard",
+          "when": "view == tabManagerExplorer && viewItem =~ /^(file\\.ext\\.[^.]+|directory|workspaceFolder)$/",
           "group": "5_cutcopypaste@3"
         },
         {
@@ -867,7 +867,7 @@
         "command": "tabManager.explorer.paste",
         "key": "ctrl+v",
         "mac": "cmd+v",
-        "when": "focusedView == tabManagerExplorer && tabManager.explorerHasClipboard"
+        "when": "focusedView == tabManagerExplorer"
       },
       {
         "command": "tabManager.explorer.copyPath",

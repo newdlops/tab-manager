@@ -29,7 +29,8 @@ A VS Code extension that brings grouping, filtering, and sorting to open tabs �
 - **Deleted files** appear as ghost entries (greyed out, `deleted` label) when the Deleted filter is on
 - **Refresh** forces a `git status` rescan on every repository before refreshing
 - **Optional metadata** shows file size and line count next to file names
-- **Context menu**: Open / Open to Side / Reveal in File Explorer / Open in Integrated Terminal / Copy Path / Copy Relative Path / Compare This File with Branch / Rename / Delete / New File / New Folder
+- **Cut / Copy / Paste** works across the OS clipboard — paste files copied in Finder, File Explorer, or another VS Code window, and files you copy here can be pasted into those apps too (`Ctrl/Cmd+X`, `Ctrl/Cmd+C`, `Ctrl/Cmd+V`)
+- **Context menu**: Open / Open to Side / Reveal in File Explorer / Open in Integrated Terminal / Cut / Copy / Paste / Copy Path / Copy Relative Path / Compare This File with Branch / Rename / Delete / New File / New Folder
 - **Title bar**: New File, New Folder, Refresh, metadata toggles, filter buttons, sort options
 
 ### Projects (Explorer sidebar)
@@ -87,7 +88,7 @@ All commands are discoverable in the Command Palette under `Tab Manager:` / `Ext
 
 **Sort** — `Sort by Name (Ascending)`, `Sort by Name (Descending)`, `No Name Sort`, `Sort by Type`
 
-**Explorer** — `New File...`, `New Folder...`, `Expand All`, `Refresh Explorer`, `Show File Size`, `Show Line Count`, `Compare This File with Branch...`, `Rename...`, `Delete`, `Copy Path`, `Copy Relative Path`, `Reveal in File Explorer`, `Open in Integrated Terminal`, `Open to the Side`
+**Explorer** — `New File...`, `New Folder...`, `Expand All`, `Refresh Explorer`, `Show File Size`, `Show Line Count`, `Compare This File with Branch...`, `Rename...`, `Delete`, `Cut`, `Copy`, `Paste`, `Copy Path`, `Copy Relative Path`, `Reveal in File Explorer`, `Open in Integrated Terminal`, `Open to the Side`
 
 **Projects** — `Add Project Folder...`, `Add Current Workspace to Projects`, `Open Project in New Window`, `Remove Project`
 
@@ -97,8 +98,7 @@ All commands are discoverable in the Command Palette under `Tab Manager:` / `Ext
 - The built-in Explorer cannot be replaced or removed programmatically. The Extended Explorer is contributed alongside it with `"order": 0` so it tends to appear first; if it does not, drag the section header above the built-in Explorer once and VS Code remembers the order
 - The `Errors` filter reflects only diagnostics that language servers have already produced — refreshing cannot force language servers to scan unopened files
 - Tabs are focused by editor group/index. If a tab was closed before the tree refreshes, it may no longer be available to reveal
-- Drag-and-drop between groups or folders is not implemented
-- Cut / Copy / Paste of files is not implemented (use built-in Explorer for that)
+- OS-clipboard file paste relies on platform tools (`osascript` on macOS, PowerShell on Windows, `wl-paste`/`xclip` on Linux). Where those are unavailable the internal Cut / Copy / Paste still works, but exchanging files with Finder / Explorer / other windows may not
 
 ## Development
 

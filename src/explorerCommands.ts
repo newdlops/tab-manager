@@ -13,6 +13,7 @@ import {
 import type { FilterSource } from './filterSource';
 import { formatOpenError, openResource } from './openResource';
 import type { PullRequestCommentDecorationProvider } from './pullRequestComments';
+import { readClipboardFileUris, writeClipboardFileUris } from './osClipboard';
 import { isVsixFileName } from './util';
 
 type AnyNode = FileTreeNode;
@@ -23,6 +24,14 @@ const MAX_EXPAND_ALL_DIRECTORIES = 1000;
 interface ClipboardState {
   mode: 'cut' | 'copy';
   uris: vscode.Uri[];
+  /** Whether these URIs were successfully mirrored onto the native OS clipboard. */
+  mirrored: boolean;
+}
+
+interface PasteSources {
+  sources: vscode.Uri[];
+  move: boolean;
+  fromInternal: boolean;
 }
 
 interface GitExtension {
@@ -306,23 +315,25 @@ export function registerExplorerCommands(
     vscode.commands.registerCommand('tabManager.explorer.cut', async (node?: AnyItem, items?: AnyItem[]) => {
       const uris = selectedUris(node, items).filter(isModifiable);
       if (uris.length === 0) return;
-      clipboard = { mode: 'cut', uris };
+      const mirrored = await writeClipboardFileUris(uris);
+      clipboard = { mode: 'cut', uris, mirrored };
       updateClipboardContext();
     }),
 
     vscode.commands.registerCommand('tabManager.explorer.copy', async (node?: AnyItem, items?: AnyItem[]) => {
       const uris = selectedUris(node, items);
       if (uris.length === 0) return;
-      clipboard = { mode: 'copy', uris };
+      const mirrored = await writeClipboardFileUris(uris);
+      clipboard = { mode: 'copy', uris, mirrored };
       updateClipboardContext();
     }),
 
     vscode.commands.registerCommand('tabManager.explorer.paste', async (node?: AnyNode) => {
-      if (!clipboard || clipboard.uris.length === 0) return;
+      const resolved = await resolvePasteSources();
+      if (!resolved || resolved.sources.length === 0) return;
       const target = await resolveContainer(node ?? selectedNodes()[0]);
       if (!target) return;
-      const move = clipboard.mode === 'cut';
-      const sources = clipboard.uris;
+      const { sources, move, fromInternal } = resolved;
 
       for (const src of sources) {
         const name = baseName(src);
@@ -358,7 +369,9 @@ export function registerExplorerCommands(
         }
       }
 
-      if (move) {
+      // A move consumes the clipboard; an external paste supersedes any stale
+      // internal clipboard so the tree stops advertising it.
+      if ((move && fromInternal) || !fromInternal) {
         clipboard = undefined;
         updateClipboardContext();
       }
@@ -723,6 +736,41 @@ function isSameOrAncestor(src: vscode.Uri, candidate: vscode.Uri): boolean {
   const s = src.toString();
   const c = candidate.toString();
   return s === c || c.startsWith(s + '/');
+}
+
+/**
+ * Decides what a paste should act on, reconciling the extension's internal
+ * clipboard with the native OS clipboard (files copied in Finder / Explorer /
+ * another VS Code window).
+ *
+ * The internal clipboard wins while it is set — preserving cut/copy semantics —
+ * unless the OS clipboard has clearly changed to a different set of files since
+ * the internal copy, in which case that newer external selection takes over.
+ * When there is no internal clipboard, any files on the OS clipboard are pasted
+ * as a copy.
+ */
+async function resolvePasteSources(): Promise<PasteSources | undefined> {
+  const osFiles = await readClipboardFileUris();
+
+  if (clipboard && clipboard.uris.length > 0) {
+    const externalIsNewer =
+      clipboard.mirrored && osFiles.length > 0 && !sameUriSet(osFiles, clipboard.uris);
+    if (externalIsNewer) {
+      return { sources: osFiles, move: false, fromInternal: false };
+    }
+    return { sources: clipboard.uris, move: clipboard.mode === 'cut', fromInternal: true };
+  }
+
+  if (osFiles.length > 0) {
+    return { sources: osFiles, move: false, fromInternal: false };
+  }
+  return undefined;
+}
+
+function sameUriSet(a: readonly vscode.Uri[], b: readonly vscode.Uri[]): boolean {
+  if (a.length !== b.length) return false;
+  const setB = new Set(b.map((u) => u.toString()));
+  return a.every((u) => setB.has(u.toString()));
 }
 
 async function exists(uri: vscode.Uri): Promise<boolean> {
