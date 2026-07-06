@@ -2,7 +2,7 @@
   "name": "tab-manager",
   "displayName": "Tab Manager",
   "description": "Group, filter, and sort open tabs and workspace files from the activity bar and Explorer.",
-  "version": "0.1.6605",
+  "version": "0.1.6606",
   "publisher": "newdlops",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -201,6 +201,12 @@
         "category": "Tab Manager"
       },
       {
+        "command": "tabManager.filter.prFiles",
+        "title": "Show PR Files Only",
+        "icon": "$(git-pull-request)",
+        "category": "Tab Manager"
+      },
+      {
         "command": "tabManager.sort.toggleReadOnly",
         "title": "Sort by Read-only",
         "category": "Tab Manager"
@@ -237,7 +243,7 @@
       },
       {
         "command": "tabManager.explorer.refreshPullRequestComments",
-        "title": "Refresh Pull Request Comments",
+        "title": "Refresh Pull Request Data",
         "icon": "$(comment-discussion)",
         "category": "Extended Explorer"
       },
@@ -518,9 +524,21 @@
           "group": "3_filter@6"
         },
         {
+          "command": "tabManager.filter.prFiles",
+          "title": "✓ Show PR Files Only",
+          "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.filterMode == 'prFiles'",
+          "group": "3_filter@7"
+        },
+        {
+          "command": "tabManager.filter.prFiles",
+          "title": "Show PR Files Only",
+          "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.filterMode != 'prFiles'",
+          "group": "3_filter@7"
+        },
+        {
           "command": "tabManager.filter.clear",
           "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.filterMode != 'none'",
-          "group": "3_filter@7"
+          "group": "3_filter@8"
         },
         {
           "command": "tabManager.explorer.toggleFileSize",

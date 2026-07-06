@@ -335,6 +335,9 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('tabManager.filter.prComments', () =>
       store.toggleFilterMode('prComments'),
     ),
+    vscode.commands.registerCommand('tabManager.filter.prFiles', () =>
+      store.toggleFilterMode('prFiles'),
+    ),
     vscode.commands.registerCommand('tabManager.filter.clear', () => store.setFilterMode('none')),
   );
 
@@ -365,6 +368,8 @@ function capitalize(s: FilterMode): string {
       return 'Read-only';
     case 'prComments':
       return 'PR Comments';
+    case 'prFiles':
+      return 'PR Files';
     default:
       return s.charAt(0).toUpperCase() + s.slice(1);
   }

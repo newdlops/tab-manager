@@ -24,7 +24,8 @@ export type FilterMode =
   | 'tabsOnly'
   | 'unsaved'
   | 'readOnly'
-  | 'prComments';
+  | 'prComments'
+  | 'prFiles';
 
 export interface UserGroup {
   id: string;
@@ -51,6 +52,7 @@ const FILTER_MODES: readonly FilterMode[] = [
   'unsaved',
   'readOnly',
   'prComments',
+  'prFiles',
 ];
 
 export class GroupStore {

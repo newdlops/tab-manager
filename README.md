@@ -49,6 +49,10 @@ A VS Code extension that brings grouping, filtering, and sorting to open tabs �
 | Deleted      | Git working tree `DELETED`                          |
 | Errors       | `DiagnosticSeverity.Error` from language servers    |
 | Open Tabs Only | URIs currently open as tabs                       |
+| Unsaved      | Tabs with unsaved (dirty) changes                   |
+| Read-only    | Files that cannot be written                        |
+| PR Comments  | Files with review comments on the current branch's GitHub PR |
+| PR Files     | Files changed in the current branch's GitHub PR     |
 
 - Only one filter is active at a time; clicking the active filter turns it off
 - Active filter is shown in each view's description (`Filter: Modified`)
@@ -84,7 +88,7 @@ All commands are discoverable in the Command Palette under `Tab Manager:` / `Ext
 
 **Tabs** — `Close Tab`, `Close Selected Tabs`, `Open Tab`
 
-**Filters** — `Show Modified Only`, `Show Untracked Only`, `Show Deleted Only`, `Show Errors Only`, `Show Open Tabs Only`, `Clear Filter`
+**Filters** — `Show Modified Only`, `Show Untracked Only`, `Show Deleted Only`, `Show Errors Only`, `Show Open Tabs Only`, `Show Unsaved Only`, `Show Read-only Only`, `Show PR Comments Only`, `Show PR Files Only`, `Clear Filter`
 
 **Sort** — `Sort by Name (Ascending)`, `Sort by Name (Descending)`, `No Name Sort`, `Sort by Type`
 

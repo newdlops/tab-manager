@@ -64,8 +64,10 @@ interface PullRequestSummary {
   readonly number: number;
 }
 
-interface PullRequestCommentDecoration {
-  readonly count: number;
+interface PullRequestFileDecoration {
+  readonly commentCount: number;
+  /** GitHub change status ('modified', 'added', ...) when the file is part of the PR diff. */
+  readonly changeStatus?: string;
   readonly pullRequestNumber: number;
 }
 
@@ -75,6 +77,11 @@ interface GithubPullRequestItem {
 
 interface GithubPullRequestComment {
   readonly path?: unknown;
+}
+
+interface GithubPullRequestFile {
+  readonly filename?: unknown;
+  readonly status?: unknown;
 }
 
 type GithubPullRequestLookupState = 'open' | 'closed';
@@ -96,8 +103,8 @@ export class PullRequestCommentDecorationProvider
 {
   private readonly _onDidChange = new vscode.EventEmitter<vscode.Uri | vscode.Uri[] | undefined>();
   readonly onDidChangeFileDecorations = this._onDidChange.event;
-  private readonly _onDidChangeCommentedFiles = new vscode.EventEmitter<void>();
-  readonly onDidChangeCommentedFiles = this._onDidChangeCommentedFiles.event;
+  private readonly _onDidChangePullRequestData = new vscode.EventEmitter<void>();
+  readonly onDidChangePullRequestData = this._onDidChangePullRequestData.event;
 
   private readonly disposables: vscode.Disposable[] = [];
   private readonly repoDisposables = new Map<Repository, vscode.Disposable>();
@@ -106,7 +113,7 @@ export class PullRequestCommentDecorationProvider
   }, 500);
 
   private git: GitAPI | undefined;
-  private decorations = new Map<string, PullRequestCommentDecoration>();
+  private decorations = new Map<string, PullRequestFileDecoration>();
   private refreshToken = 0;
 
   constructor() {
@@ -149,26 +156,41 @@ export class PullRequestCommentDecorationProvider
         return;
       }
 
-      const comments = await readPullRequestComments(pullRequest, accessToken);
+      const [comments, files] = await Promise.all([
+        readPullRequestComments(pullRequest, accessToken),
+        readPullRequestFiles(pullRequest, accessToken),
+      ]);
       if (token !== this.refreshToken) return;
 
-      const next = new Map<string, PullRequestCommentDecoration>();
+      const next = new Map<string, PullRequestFileDecoration>();
+      for (const file of files) {
+        if (typeof file.filename !== 'string' || file.filename.length === 0) continue;
+        const key = uriForRepoPath(context.repository.rootUri, file.filename).toString();
+        next.set(key, {
+          commentCount: 0,
+          changeStatus:
+            typeof file.status === 'string' && file.status.length > 0 ? file.status : 'changed',
+          pullRequestNumber: pullRequest.number,
+        });
+      }
       for (const comment of comments) {
         if (typeof comment.path !== 'string' || comment.path.length === 0) continue;
-        const uri = uriForRepoPath(context.repository.rootUri, comment.path);
-        const key = uri.toString();
+        const key = uriForRepoPath(context.repository.rootUri, comment.path).toString();
         const previous = next.get(key);
         next.set(key, {
-          count: (previous?.count ?? 0) + 1,
+          commentCount: (previous?.commentCount ?? 0) + 1,
+          changeStatus: previous?.changeStatus,
           pullRequestNumber: pullRequest.number,
         });
       }
 
       this.applyDecorations(next, token);
       if (options.showStatus) {
-        const count = comments.length;
+        const commentCount = comments.length;
+        const fileCount = files.length;
         void vscode.window.showInformationMessage(
-          `Loaded ${count} PR review comment${count === 1 ? '' : 's'} from #${pullRequest.number}.`,
+          `Loaded ${commentCount} PR review comment${commentCount === 1 ? '' : 's'} and ` +
+            `${fileCount} changed file${fileCount === 1 ? '' : 's'} from #${pullRequest.number}.`,
         );
       }
     } catch (error) {
@@ -184,23 +206,48 @@ export class PullRequestCommentDecorationProvider
     if (uri.scheme !== 'file') return undefined;
     const decoration = this.decorations.get(uri.toString());
     if (!decoration) return undefined;
-    return {
-      badge: commentBadge(decoration.count),
-      tooltip: `${decoration.count} PR review comment${decoration.count === 1 ? '' : 's'} on #${decoration.pullRequestNumber}`,
-      color: new vscode.ThemeColor('charts.yellow'),
-      propagate: false,
-    };
+    if (decoration.commentCount > 0) {
+      return {
+        badge: commentBadge(decoration.commentCount),
+        tooltip: decorationTooltip(decoration),
+        color: new vscode.ThemeColor('charts.yellow'),
+        propagate: false,
+      };
+    }
+    if (decoration.changeStatus) {
+      return {
+        badge: PULL_REQUEST_FILE_BADGE,
+        tooltip: decorationTooltip(decoration),
+        color: new vscode.ThemeColor('charts.blue'),
+        propagate: false,
+      };
+    }
+    return undefined;
   }
 
   getCommentedUris(): vscode.Uri[] {
-    return [...this.decorations.keys()].map((key) => vscode.Uri.parse(key));
+    return this.urisWhere((decoration) => decoration.commentCount > 0);
+  }
+
+  getPullRequestFileUris(): vscode.Uri[] {
+    return this.urisWhere((decoration) => !!decoration.changeStatus);
   }
 
   dispose(): void {
     for (const disposable of this.repoDisposables.values()) disposable.dispose();
     this.repoDisposables.clear();
     for (const disposable of this.disposables) disposable.dispose();
-    this._onDidChangeCommentedFiles.dispose();
+    this._onDidChangePullRequestData.dispose();
+  }
+
+  private urisWhere(
+    predicate: (decoration: PullRequestFileDecoration) => boolean,
+  ): vscode.Uri[] {
+    const uris: vscode.Uri[] = [];
+    for (const [key, decoration] of this.decorations) {
+      if (predicate(decoration)) uris.push(vscode.Uri.parse(key));
+    }
+    return uris;
   }
 
   private async bootstrapGit(): Promise<void> {
@@ -301,7 +348,7 @@ export class PullRequestCommentDecorationProvider
   }
 
   private applyDecorations(
-    next: Map<string, PullRequestCommentDecoration>,
+    next: Map<string, PullRequestFileDecoration>,
     token: number,
   ): void {
     if (token !== this.refreshToken) return;
@@ -312,7 +359,8 @@ export class PullRequestCommentDecorationProvider
       const before = this.decorations.get(key);
       const after = next.get(key);
       if (
-        before?.count !== after?.count ||
+        before?.commentCount !== after?.commentCount ||
+        before?.changeStatus !== after?.changeStatus ||
         before?.pullRequestNumber !== after?.pullRequestNumber
       ) {
         changed.push(vscode.Uri.parse(key));
@@ -322,7 +370,7 @@ export class PullRequestCommentDecorationProvider
     this.decorations = next;
     if (changed.length > 0) {
       this._onDidChange.fire(changed);
-      this._onDidChangeCommentedFiles.fire();
+      this._onDidChangePullRequestData.fire();
     }
   }
 }
@@ -386,6 +434,25 @@ async function readPullRequestComments(
   }
 
   return comments;
+}
+
+async function readPullRequestFiles(
+  pullRequest: PullRequestSummary,
+  accessToken: string | undefined,
+): Promise<GithubPullRequestFile[]> {
+  const files: GithubPullRequestFile[] = [];
+  let url: string | undefined = githubApiUrl(
+    `/repos/${encodePathPart(pullRequest.owner)}/${encodePathPart(pullRequest.repo)}/pulls/${pullRequest.number}/files`,
+    { per_page: '100' },
+  );
+
+  while (url) {
+    const { value, headers } = await githubJson<unknown[]>(url, accessToken);
+    files.push(...value.filter(isGithubPullRequestFile));
+    url = nextPageUrl(headers);
+  }
+
+  return files;
 }
 
 function githubJson<T>(
@@ -571,12 +638,41 @@ function isGithubPullRequestComment(value: unknown): value is GithubPullRequestC
   );
 }
 
+function isGithubPullRequestFile(value: unknown): value is GithubPullRequestFile {
+  return (
+    !!value &&
+    typeof value === 'object' &&
+    typeof (value as GithubPullRequestFile).filename === 'string'
+  );
+}
+
 function encodePathPart(value: string): string {
   return encodeURIComponent(value);
 }
 
+const PULL_REQUEST_FILE_BADGE = 'PR';
+
 function commentBadge(count: number): string {
   return `💬${count}`;
+}
+
+function decorationTooltip(decoration: PullRequestFileDecoration): string {
+  const parts: string[] = [];
+  if (decoration.commentCount > 0) {
+    parts.push(
+      `${decoration.commentCount} PR review comment${decoration.commentCount === 1 ? '' : 's'} on #${decoration.pullRequestNumber}`,
+    );
+  }
+  if (decoration.changeStatus) {
+    parts.push(
+      `${describeChangeStatus(decoration.changeStatus)} in PR #${decoration.pullRequestNumber}`,
+    );
+  }
+  return parts.join(' · ');
+}
+
+function describeChangeStatus(status: string): string {
+  return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
 function formatError(error: unknown): string {
