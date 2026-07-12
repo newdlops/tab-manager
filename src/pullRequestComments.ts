@@ -233,6 +233,16 @@ export class PullRequestCommentDecorationProvider
     return this.urisWhere((decoration) => !!decoration.changeStatus);
   }
 
+  /** PR 변경 파일의 URI와 GitHub 상태를 함께 반환해 삭제 ghost 표시에도 재사용한다. */
+  getPullRequestFileEntries(): Array<{ uri: vscode.Uri; status?: string }> {
+    const entries: Array<{ uri: vscode.Uri; status?: string }> = [];
+    for (const [key, decoration] of this.decorations) {
+      if (!decoration.changeStatus) continue;
+      entries.push({ uri: vscode.Uri.parse(key), status: decoration.changeStatus });
+    }
+    return entries;
+  }
+
   dispose(): void {
     for (const disposable of this.repoDisposables.values()) disposable.dispose();
     this.repoDisposables.clear();

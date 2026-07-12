@@ -15,11 +15,33 @@ import { ProjectProvider, ProjectStore, registerProjectCommands } from './projec
 import { PullRequestCommentDecorationProvider } from './pullRequestComments';
 import { UnsavedDecorationProvider } from './unsavedDecorations';
 import { debounce } from './util';
+import { ComparisonSource } from './comparisonSource';
+
+const FILTER_CLEAR_COMMAND_ALIASES = {
+  'tabManager.filter.clearModified': 'modified',
+  'tabManager.filter.clearUntracked': 'untracked',
+  'tabManager.filter.clearDeleted': 'deleted',
+  'tabManager.filter.clearErrors': 'errors',
+  'tabManager.filter.clearTabsOnly': 'tabsOnly',
+  'tabManager.filter.clearUnsaved': 'unsaved',
+  'tabManager.filter.clearReadOnly': 'readOnly',
+  'tabManager.filter.clearPrComments': 'prComments',
+  'tabManager.filter.clearPrFiles': 'prFiles',
+  'tabManager.filter.clearComparison': 'comparison',
+} as const satisfies Record<string, Exclude<FilterMode, 'none'>>;
+
+export const RENDERER_TOOLTIP_SCHEMA_KEY = 'tabManager.rendererTooltipSchemaVersion';
+const RENDERER_TOOLTIP_SCHEMA_VERSION = 1;
+const RENDERER_TOOLTIP_NOTICE_MESSAGE =
+  'Header action tooltips were updated. Reload VS Code once to apply them.';
+const RELOAD_WINDOW_ACTION = 'Reload Window';
+const rendererTooltipNoticeContexts = new WeakSet<vscode.ExtensionContext>();
 
 export function activate(context: vscode.ExtensionContext) {
   const store = new GroupStore(context);
   const pullRequestCommentDecorations = new PullRequestCommentDecorationProvider();
-  const filterSource = new FilterSource(pullRequestCommentDecorations);
+  const comparisonSource = new ComparisonSource();
+  const filterSource = new FilterSource(pullRequestCommentDecorations, comparisonSource);
   const provider = new TabTreeDataProvider(store, filterSource);
   const explorerProvider = new ExplorerProvider(store, filterSource);
   const projectStore = new ProjectStore(context);
@@ -94,6 +116,8 @@ export function activate(context: vscode.ExtensionContext) {
   let lastFilterContext: FilterMode | undefined;
   let lastLayoutContext: TabLayoutMode | undefined;
   let lastExplorerDisplayContext: ExplorerDisplayOptions | undefined;
+  let lastHasSelectedTabs: boolean | undefined;
+  let lastHasActiveComparison: boolean | undefined;
   const updateViewDescriptions = () => {
     const mode = store.getFilterMode();
     const layout = store.getTabLayoutMode();
@@ -158,11 +182,33 @@ export function activate(context: vscode.ExtensionContext) {
   const syncExplorerTitle = () => {
     filesView.title = vscode.workspace.name ?? 'Workspace';
   };
+  const syncSelectedTabsContext = () => {
+    const hasSelectedTabs = view.selection.some((node) => node instanceof TabNode);
+    if (lastHasSelectedTabs === hasSelectedTabs) return;
+    lastHasSelectedTabs = hasSelectedTabs;
+    void vscode.commands.executeCommand(
+      'setContext',
+      'tabManager.hasSelectedTabs',
+      hasSelectedTabs,
+    );
+  };
+  const syncActiveComparisonContext = () => {
+    const hasActiveComparison = comparisonSource.getEntries().length > 0;
+    if (lastHasActiveComparison === hasActiveComparison) return;
+    lastHasActiveComparison = hasActiveComparison;
+    void vscode.commands.executeCommand(
+      'setContext',
+      'tabManager.hasActiveComparison',
+      hasActiveComparison,
+    );
+  };
   syncExplorerTitle();
   syncSortContext();
   syncFilterState();
   syncLayoutState();
   syncExplorerDisplayState();
+  syncSelectedTabsContext();
+  syncActiveComparisonContext();
   store.onDidChange(() => {
     syncSortContext();
     syncFilterState();
@@ -177,6 +223,7 @@ export function activate(context: vscode.ExtensionContext) {
     projectStore,
     explorerProvider,
     projectProvider,
+    comparisonSource,
     filterSource,
     unsavedDecorations,
     pullRequestCommentDecorations,
@@ -184,6 +231,8 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.window.registerFileDecorationProvider(pullRequestCommentDecorations),
     vscode.window.tabGroups.onDidChangeTabs(scheduleTabRefreshForTabs),
     vscode.window.tabGroups.onDidChangeTabGroups(scheduleTabRefreshForGroups),
+    view.onDidChangeSelection(syncSelectedTabsContext),
+    comparisonSource.onDidChange(syncActiveComparisonContext),
     filesView.onDidCollapseElement((event) => explorerProvider.unwatchNode(event.element)),
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
       syncExplorerTitle();
@@ -292,9 +341,15 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('tabManager.sort.nameDesc', () => store.setNameSort('desc')),
     vscode.commands.registerCommand('tabManager.sort.nameNone', () => store.setNameSort('none')),
     vscode.commands.registerCommand('tabManager.sort.toggleType', () => store.toggleTypeSort()),
+    vscode.commands.registerCommand('tabManager.sort.stopType', () => {
+      if (store.getSortState().type) return store.toggleTypeSort();
+    }),
     vscode.commands.registerCommand('tabManager.sort.toggleReadOnly', () =>
       store.toggleReadOnlySort(),
     ),
+    vscode.commands.registerCommand('tabManager.sort.stopReadOnly', () => {
+      if (store.getSortState().readOnly) return store.toggleReadOnlySort();
+    }),
     vscode.commands.registerCommand('tabManager.layout.byColumn', () =>
       store.setTabLayoutMode('byColumn'),
     ),
@@ -304,9 +359,15 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('tabManager.explorer.toggleFileSize', () =>
       store.toggleExplorerFileSize(),
     ),
+    vscode.commands.registerCommand('tabManager.explorer.hideFileSize', () => {
+      if (store.getExplorerDisplayOptions().fileSize) return store.toggleExplorerFileSize();
+    }),
     vscode.commands.registerCommand('tabManager.explorer.toggleLineCount', () =>
       store.toggleExplorerLineCount(),
     ),
+    vscode.commands.registerCommand('tabManager.explorer.hideLineCount', () => {
+      if (store.getExplorerDisplayOptions().lineCount) return store.toggleExplorerLineCount();
+    }),
     vscode.commands.registerCommand('tabManager.explorer.refreshPullRequestComments', () =>
       pullRequestCommentDecorations.refresh({ createSession: true, showStatus: true }),
     ),
@@ -338,8 +399,18 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.registerCommand('tabManager.filter.prFiles', () =>
       store.toggleFilterMode('prFiles'),
     ),
+    vscode.commands.registerCommand('tabManager.filter.comparison', () =>
+      store.toggleFilterMode('comparison'),
+    ),
     vscode.commands.registerCommand('tabManager.filter.clear', () => store.setFilterMode('none')),
+    ...Object.entries(FILTER_CLEAR_COMMAND_ALIASES).map(([command, filterMode]) =>
+      vscode.commands.registerCommand(command, () => {
+        if (store.getFilterMode() === filterMode) return store.setFilterMode('none');
+      }),
+    ),
   );
+
+  scheduleRendererTooltipReloadNotice(context);
 
   if (process.env.TAB_MANAGER_E2E === '1') {
     return {
@@ -349,12 +420,43 @@ export function activate(context: vscode.ExtensionContext) {
       projectStore,
       projectProvider,
       filterSource,
+      comparisonSource,
       pullRequestCommentDecorations,
       context,
       tabView: view,
       explorerView: filesView,
       projectsView,
     };
+  }
+}
+
+/**
+ * 갱신된 헤더 tooltip listener가 Workbench renderer에 반영되도록 production에서만 안내한다.
+ * activation을 막지 않으며, schema 버전을 먼저 저장해 같은 안내가 반복되지 않게 한다.
+ */
+export function scheduleRendererTooltipReloadNotice(context: vscode.ExtensionContext): void {
+  if (context.extensionMode !== vscode.ExtensionMode.Production) return;
+  if (rendererTooltipNoticeContexts.has(context)) return;
+  const shownVersion = context.globalState.get<number>(RENDERER_TOOLTIP_SCHEMA_KEY, 0);
+  if (shownVersion >= RENDERER_TOOLTIP_SCHEMA_VERSION) return;
+
+  rendererTooltipNoticeContexts.add(context);
+  void persistAndShowRendererTooltipNotice(context).catch((error) => {
+    console.error('Tab Manager could not show the renderer tooltip reload notice.', error);
+  });
+}
+
+/** schema 버전을 기록한 뒤 사용자 선택이 있을 때만 현재 VS Code 창을 다시 연다. */
+async function persistAndShowRendererTooltipNotice(
+  context: vscode.ExtensionContext,
+): Promise<void> {
+  await context.globalState.update(RENDERER_TOOLTIP_SCHEMA_KEY, RENDERER_TOOLTIP_SCHEMA_VERSION);
+  const action = await vscode.window.showInformationMessage(
+    RENDERER_TOOLTIP_NOTICE_MESSAGE,
+    RELOAD_WINDOW_ACTION,
+  );
+  if (action === RELOAD_WINDOW_ACTION) {
+    await vscode.commands.executeCommand('workbench.action.reloadWindow');
   }
 }
 
@@ -370,6 +472,8 @@ function capitalize(s: FilterMode): string {
       return 'PR Comments';
     case 'prFiles':
       return 'PR Files';
+    case 'comparison':
+      return 'Comparison';
     default:
       return s.charAt(0).toUpperCase() + s.slice(1);
   }

@@ -81,11 +81,11 @@ export class TabNode extends vscode.TreeItem {
       this.resourceUri = uri;
       this.iconPath = vscode.ThemeIcon.File;
       descParts.push(vscode.workspace.asRelativePath(uri, false));
-      this.tooltip = uri.fsPath;
+      this.tooltip = `${uri.fsPath}\nOpen Tab`;
     } else {
       this.iconPath = new vscode.ThemeIcon(iconForType(category));
       descParts.push(category);
-      this.tooltip = tab.label;
+      this.tooltip = `${tab.label}\nOpen Tab`;
     }
     if (showColumn) descParts.push(tabColumnLabel(tab));
     if (tab.isPreview) descParts.push('preview');
@@ -93,6 +93,7 @@ export class TabNode extends vscode.TreeItem {
     if (isReadOnly) descParts.push('read-only');
     if (isMissing) descParts.push('missing');
     this.description = descParts.join(' · ');
+    this.accessibilityInformation = { label: `${tab.label}, Open Tab`, role: 'treeitem' };
 
     this.command = {
       command: 'tabManager.openTab',

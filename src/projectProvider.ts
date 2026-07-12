@@ -19,6 +19,10 @@ export class ProjectNode extends vscode.TreeItem {
       : vscode.ThemeIcon.Folder;
     this.contextValue = 'project';
     this.id = `project:${project.uri.toString()}`;
+    this.accessibilityInformation = {
+      label: `${projectLabel(project.uri)}, Open Project in New Window`,
+      role: 'treeitem',
+    };
     this.command = {
       command: 'tabManager.projects.open',
       title: 'Open Project in New Window',
@@ -243,7 +247,7 @@ function projectDescription(uri: vscode.Uri): string {
 }
 
 function projectTooltip(uri: vscode.Uri): string {
-  return `${projectLabel(uri)}\n${projectDescription(uri)}`;
+  return `${projectLabel(uri)}\n${projectDescription(uri)}\nOpen Project in New Window`;
 }
 
 function isWorkspaceFile(uri: vscode.Uri): boolean {

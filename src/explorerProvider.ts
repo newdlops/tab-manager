@@ -10,6 +10,7 @@ export type PendingKind = 'file' | 'folder';
 
 interface FileNodeMetadata {
   descriptionParts?: readonly string[];
+  command?: vscode.Command;
 }
 
 export class WorkspaceFolderNode extends vscode.TreeItem {
@@ -50,22 +51,32 @@ export class FileNode extends vscode.TreeItem {
     public readonly isDeleted = false,
     metadata: FileNodeMetadata = {},
   ) {
-    super(baseName(uri), vscode.TreeItemCollapsibleState.None);
+    const name = baseName(uri);
+    super(isDeleted ? strikeThrough(name) : name, vscode.TreeItemCollapsibleState.None);
     this.resourceUri = uri;
     this.id = `file:${isDeleted ? 'deleted:' : ''}${uri.toString()}`;
     if (isDeleted) {
       this.description = 'deleted';
-      this.contextValue = fileContextValue(baseName(uri), { deleted: true });
-      this.tooltip = `${uri.fsPath} (deleted)`;
+      this.contextValue = fileContextValue(name, { deleted: true });
+      const actionTitle = metadata.command?.title;
+      this.tooltip = actionTitle
+        ? `${uri.fsPath} (deleted)\n${actionTitle}`
+        : `${uri.fsPath} (deleted)`;
+      this.accessibilityInformation = {
+        label: actionTitle ? `${name}, deleted, ${actionTitle}` : `${name}, deleted`,
+        role: 'treeitem',
+      };
+      this.command = metadata.command;
     } else {
       this.contextValue = fileContextValue(baseName(uri));
-      this.tooltip = uri.fsPath;
+      this.tooltip = `${uri.fsPath}\nOpen File`;
+      this.accessibilityInformation = { label: `${name}, Open File`, role: 'treeitem' };
       if (metadata.descriptionParts?.length) {
         this.description = metadata.descriptionParts.join(' · ');
       }
       this.command = {
         command: 'tabManager.explorer.open',
-        title: 'Open',
+        title: 'Open File',
         arguments: [uri],
       };
     }
@@ -106,7 +117,10 @@ export class ExplorerProvider
     mode: FilterMode;
     matching: ReadonlySet<string>;
     ancestors: Set<string>;
-    deletedByParent?: Map<string, vscode.Uri[]>;
+    deletedKeys: ReadonlySet<string>;
+    deletedCommandsByUri?: ReadonlyMap<string, vscode.Command>;
+    deletedFilesByParent?: Map<string, vscode.Uri[]>;
+    deletedDirectoriesByParent?: Map<string, vscode.Uri[]>;
   };
   private readonly dirCache = new Map<string, [string, vscode.FileType][]>();
   private readonly fileMetadataCache = new Map<string, CachedFileMetadata>();
@@ -320,7 +334,7 @@ export class ExplorerProvider
       try {
         entries = await vscode.workspace.fs.readDirectory(folder);
       } catch {
-        return [];
+        entries = [];
       }
       this.dirCache.set(cacheKey, entries);
     }
@@ -330,19 +344,26 @@ export class ExplorerProvider
     const matching = this.cache!.matching;
     const ancestors = this.cache!.ancestors;
     const displayOptions = this.store.getExplorerDisplayOptions();
+    const present = new Set<string>();
 
     const nodes: FileTreeNode[] = [];
     for (const [name, type] of entries) {
       const uri = vscode.Uri.joinPath(folder, name);
       const key = uri.toString();
+      present.add(key);
       if (type & vscode.FileType.Directory) {
         if (mode === 'none' || ancestors.has(key)) {
           nodes.push(new DirectoryNode(uri, this.isPendingAncestor(uri)));
         }
       } else if (type & vscode.FileType.File) {
         if (mode === 'none' || matching.has(key)) {
+          const isDeleted = this.cache!.deletedKeys.has(key);
           nodes.push(
-            displayOptions.fileSize || displayOptions.lineCount
+            isDeleted
+              ? new FileNode(uri, true, {
+                  command: this.cache!.deletedCommandsByUri?.get(key),
+                })
+              : displayOptions.fileSize || displayOptions.lineCount
               ? await this.createFileNode(uri, displayOptions)
               : new FileNode(uri),
           );
@@ -350,9 +371,22 @@ export class ExplorerProvider
       }
     }
 
-    if (mode === 'deleted') {
-      const deleted = this.cache?.deletedByParent?.get(cacheKey) ?? [];
-      for (const du of deleted) nodes.push(new FileNode(du, true));
+    const ghostDirectories = this.cache?.deletedDirectoriesByParent?.get(cacheKey) ?? [];
+    for (const directoryUri of ghostDirectories) {
+      if (present.has(directoryUri.toString())) continue;
+      present.add(directoryUri.toString());
+      nodes.push(new DirectoryNode(directoryUri, this.isPendingAncestor(directoryUri)));
+    }
+
+    const deletedFiles = this.cache?.deletedFilesByParent?.get(cacheKey) ?? [];
+    for (const deletedUri of deletedFiles) {
+      if (present.has(deletedUri.toString())) continue;
+      present.add(deletedUri.toString());
+      nodes.push(
+        new FileNode(deletedUri, true, {
+          command: this.cache?.deletedCommandsByUri?.get(deletedUri.toString()),
+        }),
+      );
     }
 
     nodes.sort(makeCompareNodes(this.store.getSortState()));
@@ -452,21 +486,32 @@ export class ExplorerProvider
   private ensureCache(mode: FilterMode): void {
     if (this.cache?.mode === mode) return;
     if (mode === 'none') {
-      this.cache = { mode, matching: new Set(), ancestors: new Set() };
+      this.cache = {
+        mode,
+        matching: new Set(),
+        ancestors: new Set(),
+        deletedKeys: new Set(),
+      };
       return;
     }
-    const uris = this.filter.getUris(mode);
+    const entries = this.filter.getEntries(mode);
+    const uris = entries.map((entry) => entry.uri);
     const matching = this.filter.getUriKeySet(mode);
     const ancestors = new Set<string>();
-    const deletedByParent = mode === 'deleted' ? new Map<string, vscode.Uri[]>() : undefined;
+    const deletedEntries = entries.filter((entry) => isDeletedStatus(entry.status));
+    const deletedKeys = new Set(deletedEntries.map((entry) => entry.uri.toString()));
+    const deletedCommandsByUri = new Map<string, vscode.Command>();
+    for (const entry of deletedEntries) {
+      if (entry.command) deletedCommandsByUri.set(entry.uri.toString(), entry.command);
+    }
+    const deletedFilesByParent = deletedEntries.length > 0
+      ? new Map<string, vscode.Uri[]>()
+      : undefined;
+    const deletedDirectoriesByParent = deletedEntries.length > 0
+      ? new Map<string, vscode.Uri[]>()
+      : undefined;
     for (const uri of uris) {
       let p = parentUri(uri);
-      if (deletedByParent) {
-        const parentKey = p.toString();
-        const existing = deletedByParent.get(parentKey);
-        if (existing) existing.push(uri);
-        else deletedByParent.set(parentKey, [uri]);
-      }
       while (true) {
         const s = p.toString();
         if (ancestors.has(s)) break;
@@ -476,8 +521,56 @@ export class ExplorerProvider
         p = np;
       }
     }
-    this.cache = { mode, matching, ancestors, deletedByParent };
+    for (const entry of deletedEntries) {
+      const parent = parentUri(entry.uri);
+      appendUri(deletedFilesByParent!, parent, entry.uri);
+
+      const workspaceRoot = vscode.workspace.workspaceFolders?.find((folder) =>
+        isInsideFolder(entry.uri, folder.uri),
+      )?.uri;
+      if (!workspaceRoot) continue;
+
+      let directory = parent;
+      while (directory.toString() !== workspaceRoot.toString()) {
+        const directoryParent = parentUri(directory);
+        if (directoryParent.toString() === directory.toString()) break;
+        appendUri(deletedDirectoriesByParent!, directoryParent, directory);
+        directory = directoryParent;
+      }
+    }
+    this.cache = {
+      mode,
+      matching,
+      ancestors,
+      deletedKeys,
+      deletedCommandsByUri,
+      deletedFilesByParent,
+      deletedDirectoriesByParent,
+    };
   }
+}
+
+/** 삭제 상태 표기를 공급자별 문자열 차이와 무관하게 판별한다. */
+function isDeletedStatus(status: string | undefined): boolean {
+  if (!status) return false;
+  const normalized = status.toLowerCase();
+  return normalized === 'd' || normalized === 'deleted' || normalized === 'removed';
+}
+
+/** 부모 URI별 ghost 자식 목록에 중복 없이 URI를 추가한다. */
+function appendUri(map: Map<string, vscode.Uri[]>, parent: vscode.Uri, child: vscode.Uri): void {
+  const key = parent.toString();
+  const existing = map.get(key);
+  if (!existing) {
+    map.set(key, [child]);
+    return;
+  }
+  if (!existing.some((uri) => uri.toString() === child.toString())) existing.push(child);
+}
+
+/** TreeItem이 CSS를 지원하지 않아 결합 취소선으로 삭제 파일의 시각 상태를 표현한다. */
+function strikeThrough(value: string): string {
+  return Array.from(value, (character) => `${character}\u0336`).join('');
 }
 
 function formatFileSize(bytes: number): string {
@@ -601,6 +694,7 @@ function makeCompareNodes(sort: SortState): (a: FileTreeNode, b: FileTreeNode) =
 }
 
 function labelOf(node: FileTreeNode): string {
+  if (node instanceof FileNode) return baseName(node.uri);
   const l = node.label;
   if (typeof l === 'string') return l;
   if (l && typeof l === 'object' && 'label' in l) return l.label;

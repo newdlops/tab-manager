@@ -2,7 +2,7 @@
   "name": "tab-manager",
   "displayName": "Tab Manager",
   "description": "Group, filter, and sort open tabs and workspace files from the activity bar and Explorer.",
-  "version": "0.1.6606",
+  "version": "0.1.6609",
   "publisher": "newdlops",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -86,10 +86,14 @@
         "contents": "No projects saved."
       }
     ],
+    "configurationDefaults": {
+      "workbench.hover.delay": 0
+    },
     "commands": [
       {
         "command": "tabManager.createGroup",
-        "title": "New Group",
+        "title": "Create a New Tab Group",
+        "shortTitle": "New Group",
         "icon": "$(new-folder)",
         "category": "Tab Manager"
       },
@@ -106,13 +110,15 @@
       },
       {
         "command": "tabManager.closeTab",
-        "title": "Close Tab",
+        "title": "Close the Selected Tab or Tabs",
+        "shortTitle": "Close Tab",
         "icon": "$(close)",
         "category": "Tab Manager"
       },
       {
         "command": "tabManager.closeSelected",
-        "title": "Close Selected Tabs",
+        "title": "Close the Selected Tabs",
+        "shortTitle": "Close Selected Tabs",
         "icon": "$(close-all)",
         "category": "Tab Manager"
       },
@@ -128,145 +134,271 @@
       },
       {
         "command": "tabManager.sort.nameAsc",
-        "title": "Sort by Name (Ascending)",
+        "title": "Sort Tabs and Files by Name in Ascending Order",
+        "shortTitle": "Sort by Name (Ascending)",
         "category": "Tab Manager"
       },
       {
         "command": "tabManager.sort.nameDesc",
-        "title": "Sort by Name (Descending)",
+        "title": "Sort Tabs and Files by Name in Descending Order",
+        "shortTitle": "Sort by Name (Descending)",
         "category": "Tab Manager"
       },
       {
         "command": "tabManager.sort.nameNone",
-        "title": "No Name Sort",
+        "title": "Stop Sorting Tabs and Files by Name",
+        "shortTitle": "Stop Sorting by Name",
         "category": "Tab Manager"
       },
       {
         "command": "tabManager.sort.toggleType",
-        "title": "Sort by Type",
+        "title": "Sort Tabs and Files by Type",
+        "shortTitle": "Sort by Type",
+        "category": "Tab Manager"
+      },
+      {
+        "command": "tabManager.sort.stopType",
+        "title": "Stop Sorting Tabs and Files by Type",
+        "shortTitle": "Stop Sorting by Type",
         "category": "Tab Manager"
       },
       {
         "command": "tabManager.filter.modified",
-        "title": "Show Modified Only",
+        "title": "Show Only Modified Files",
+        "shortTitle": "Show Modified Only",
         "icon": "$(diff-modified)",
         "category": "Tab Manager"
       },
       {
         "command": "tabManager.filter.untracked",
         "title": "Show Untracked Only",
+        "shortTitle": "Untracked Files Only",
         "icon": "$(diff-added)",
         "category": "Tab Manager"
       },
       {
         "command": "tabManager.filter.deleted",
         "title": "Show Deleted Only",
+        "shortTitle": "Deleted Files Only",
         "icon": "$(diff-removed)",
         "category": "Tab Manager"
       },
       {
         "command": "tabManager.filter.errors",
-        "title": "Show Errors Only",
+        "title": "Show Only Files with Errors",
+        "shortTitle": "Show Errors Only",
         "icon": "$(error)",
         "category": "Tab Manager"
       },
       {
         "command": "tabManager.filter.clear",
-        "title": "Clear Filter",
+        "title": "Clear the Active Tab Manager Filter",
+        "shortTitle": "Clear Filter",
         "icon": "$(clear-all)",
         "category": "Tab Manager"
       },
       {
         "command": "tabManager.filter.tabsOnly",
         "title": "Show Open Tabs Only",
+        "shortTitle": "Open Tabs Only",
         "icon": "$(files)",
         "category": "Tab Manager"
       },
       {
         "command": "tabManager.filter.unsaved",
         "title": "Show Unsaved Only",
+        "shortTitle": "Unsaved Files Only",
         "icon": "$(circle-filled)",
         "category": "Tab Manager"
       },
       {
         "command": "tabManager.filter.readOnly",
         "title": "Show Read-only Only",
+        "shortTitle": "Read-only Files Only",
         "icon": "$(lock)",
         "category": "Tab Manager"
       },
       {
         "command": "tabManager.filter.prComments",
         "title": "Show PR Comments Only",
+        "shortTitle": "PR Comments Only",
         "icon": "$(comment-discussion)",
         "category": "Tab Manager"
       },
       {
         "command": "tabManager.filter.prFiles",
         "title": "Show PR Files Only",
+        "shortTitle": "PR Files Only",
         "icon": "$(git-pull-request)",
         "category": "Tab Manager"
       },
       {
+        "command": "tabManager.filter.comparison",
+        "title": "Show Only Files Changed in the Active Comparison",
+        "shortTitle": "Show Changed Files Only",
+        "icon": "$(git-compare)",
+        "category": "Tab Manager"
+      },
+      {
+        "command": "tabManager.filter.clearModified",
+        "title": "Clear the Modified Files Filter",
+        "shortTitle": "Clear Modified Filter",
+        "icon": "$(clear-all)",
+        "category": "Tab Manager"
+      },
+      {
+        "command": "tabManager.filter.clearUntracked",
+        "title": "Clear the Untracked Files Filter",
+        "shortTitle": "Clear Untracked Filter",
+        "icon": "$(clear-all)",
+        "category": "Tab Manager"
+      },
+      {
+        "command": "tabManager.filter.clearDeleted",
+        "title": "Clear the Deleted Files Filter",
+        "shortTitle": "Clear Deleted Filter",
+        "icon": "$(clear-all)",
+        "category": "Tab Manager"
+      },
+      {
+        "command": "tabManager.filter.clearErrors",
+        "title": "Clear the Files with Errors Filter",
+        "shortTitle": "Clear Errors Filter",
+        "icon": "$(clear-all)",
+        "category": "Tab Manager"
+      },
+      {
+        "command": "tabManager.filter.clearTabsOnly",
+        "title": "Clear the Open Tabs Filter",
+        "shortTitle": "Clear Open Tabs Filter",
+        "icon": "$(clear-all)",
+        "category": "Tab Manager"
+      },
+      {
+        "command": "tabManager.filter.clearUnsaved",
+        "title": "Clear the Unsaved Files Filter",
+        "shortTitle": "Clear Unsaved Filter",
+        "icon": "$(clear-all)",
+        "category": "Tab Manager"
+      },
+      {
+        "command": "tabManager.filter.clearReadOnly",
+        "title": "Clear the Read-only Files Filter",
+        "shortTitle": "Clear Read-only Filter",
+        "icon": "$(clear-all)",
+        "category": "Tab Manager"
+      },
+      {
+        "command": "tabManager.filter.clearPrComments",
+        "title": "Clear the Pull Request Comments Filter",
+        "shortTitle": "Clear PR Comments Filter",
+        "icon": "$(clear-all)",
+        "category": "Tab Manager"
+      },
+      {
+        "command": "tabManager.filter.clearPrFiles",
+        "title": "Clear the Pull Request Files Filter",
+        "shortTitle": "Clear PR Files Filter",
+        "icon": "$(clear-all)",
+        "category": "Tab Manager"
+      },
+      {
+        "command": "tabManager.filter.clearComparison",
+        "title": "Clear the Active Comparison Files Filter",
+        "shortTitle": "Clear Comparison Filter",
+        "icon": "$(clear-all)",
+        "category": "Tab Manager"
+      },
+      {
         "command": "tabManager.sort.toggleReadOnly",
-        "title": "Sort by Read-only",
+        "title": "Sort Tabs by Read-only Status",
+        "shortTitle": "Sort by Read-only",
+        "category": "Tab Manager"
+      },
+      {
+        "command": "tabManager.sort.stopReadOnly",
+        "title": "Stop Sorting Tabs by Read-only Status",
+        "shortTitle": "Stop Sorting by Read-only",
         "category": "Tab Manager"
       },
       {
         "command": "tabManager.layout.byColumn",
-        "title": "Show Tabs by Editor Column",
+        "title": "Show Tabs Grouped by Editor Column",
+        "shortTitle": "Group by Editor Column",
         "icon": "$(split-horizontal)",
         "category": "Tab Manager"
       },
       {
         "command": "tabManager.layout.merged",
-        "title": "Show All Columns Combined",
+        "title": "Show Tabs from All Editor Columns in One List",
+        "shortTitle": "Combine All Columns",
         "icon": "$(list-flat)",
         "category": "Tab Manager"
       },
       {
         "command": "tabManager.explorer.newFile",
-        "title": "New File...",
+        "title": "Create a New File in the Selected Folder",
+        "shortTitle": "New File...",
         "icon": "$(new-file)",
         "category": "Extended Explorer"
       },
       {
         "command": "tabManager.explorer.newFolder",
-        "title": "New Folder...",
+        "title": "Create a New Folder in the Selected Folder",
+        "shortTitle": "New Folder...",
         "icon": "$(new-folder)",
         "category": "Extended Explorer"
       },
       {
         "command": "tabManager.explorer.refresh",
-        "title": "Refresh Explorer",
+        "title": "Refresh Files and Filter Data in Tab Manager Explorer",
+        "shortTitle": "Refresh Explorer",
         "icon": "$(refresh)",
         "category": "Extended Explorer"
       },
       {
         "command": "tabManager.explorer.refreshPullRequestComments",
-        "title": "Refresh Pull Request Data",
+        "title": "Refresh Pull Request Files and Review Comments",
+        "shortTitle": "Refresh PR Data",
         "icon": "$(comment-discussion)",
         "category": "Extended Explorer"
       },
       {
         "command": "tabManager.explorer.revealActive",
-        "title": "Reveal Active File in Explorer",
+        "title": "Reveal the Active File in Tab Manager Explorer",
+        "shortTitle": "Reveal Active File",
         "icon": "$(target)",
         "category": "Extended Explorer"
       },
       {
         "command": "tabManager.explorer.expandAll",
-        "title": "Expand All",
+        "title": "Expand All Folders in Tab Manager Explorer",
+        "shortTitle": "Expand All",
         "icon": "$(expand-all)",
         "category": "Extended Explorer"
       },
       {
         "command": "tabManager.explorer.toggleFileSize",
-        "title": "Show File Size",
+        "title": "Show File Size in Tab Manager Explorer",
+        "shortTitle": "Show File Size",
+        "category": "Extended Explorer"
+      },
+      {
+        "command": "tabManager.explorer.hideFileSize",
+        "title": "Hide File Size in Tab Manager Explorer",
+        "shortTitle": "Hide File Size",
         "category": "Extended Explorer"
       },
       {
         "command": "tabManager.explorer.toggleLineCount",
-        "title": "Show Line Count",
+        "title": "Show Line Count in Tab Manager Explorer",
+        "shortTitle": "Show Line Count",
+        "category": "Extended Explorer"
+      },
+      {
+        "command": "tabManager.explorer.hideLineCount",
+        "title": "Hide Line Count in Tab Manager Explorer",
+        "shortTitle": "Hide Line Count",
         "category": "Extended Explorer"
       },
       {
@@ -311,7 +443,8 @@
       },
       {
         "command": "tabManager.explorer.installVsix",
-        "title": "Install VSIX Extension",
+        "title": "Install the Selected VSIX Extension",
+        "shortTitle": "Install VSIX Extension",
         "icon": "$(extensions)",
         "category": "Extended Explorer"
       },
@@ -362,13 +495,15 @@
       },
       {
         "command": "tabManager.projects.addFolder",
-        "title": "Add Project Folder...",
+        "title": "Add a Project Folder to Tab Manager",
+        "shortTitle": "Add Project Folder...",
         "icon": "$(folder-opened)",
         "category": "Projects"
       },
       {
         "command": "tabManager.projects.addCurrentWorkspace",
-        "title": "Add Current Workspace to Projects",
+        "title": "Add the Current Workspace to Tab Manager Projects",
+        "shortTitle": "Add Current Workspace",
         "icon": "$(add)",
         "category": "Projects"
       },
@@ -380,6 +515,22 @@
       }
     ],
     "menus": {
+      "commandPalette": [
+        { "command": "tabManager.filter.clearModified", "when": "false" },
+        { "command": "tabManager.filter.clearUntracked", "when": "false" },
+        { "command": "tabManager.filter.clearDeleted", "when": "false" },
+        { "command": "tabManager.filter.clearErrors", "when": "false" },
+        { "command": "tabManager.filter.clearTabsOnly", "when": "false" },
+        { "command": "tabManager.filter.clearUnsaved", "when": "false" },
+        { "command": "tabManager.filter.clearReadOnly", "when": "false" },
+        { "command": "tabManager.filter.clearPrComments", "when": "false" },
+        { "command": "tabManager.filter.clearPrFiles", "when": "false" },
+        { "command": "tabManager.filter.clearComparison", "when": "false" },
+        { "command": "tabManager.explorer.hideFileSize", "when": "false" },
+        { "command": "tabManager.explorer.hideLineCount", "when": "false" },
+        { "command": "tabManager.sort.stopType", "when": "false" },
+        { "command": "tabManager.sort.stopReadOnly", "when": "false" }
+      ],
       "view/title": [
         {
           "command": "tabManager.createGroup",
@@ -388,7 +539,7 @@
         },
         {
           "command": "tabManager.closeSelected",
-          "when": "view == tabManagerView",
+          "when": "view == tabManagerView && tabManager.hasSelectedTabs",
           "group": "navigation@2"
         },
         {
@@ -403,17 +554,17 @@
         },
         {
           "command": "tabManager.explorer.newFile",
-          "when": "view == tabManagerExplorer",
+          "when": "view == tabManagerExplorer && workbenchState != empty",
           "group": "navigation@1"
         },
         {
           "command": "tabManager.explorer.newFolder",
-          "when": "view == tabManagerExplorer",
+          "when": "view == tabManagerExplorer && workbenchState != empty",
           "group": "navigation@2"
         },
         {
           "command": "tabManager.explorer.revealActive",
-          "when": "view == tabManagerExplorer",
+          "when": "view == tabManagerExplorer && workbenchState != empty",
           "group": "navigation@3"
         },
         {
@@ -428,7 +579,7 @@
         },
         {
           "command": "tabManager.explorer.expandAll",
-          "when": "view == tabManagerExplorer",
+          "when": "view == tabManagerExplorer && workbenchState != empty",
           "group": "navigation@99"
         },
         {
@@ -443,208 +594,181 @@
         },
         {
           "command": "tabManager.filter.modified",
-          "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/",
+          "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.filterMode != 'modified'",
+          "group": "navigation@10"
+        },
+        {
+          "command": "tabManager.filter.clearModified",
+          "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.filterMode == 'modified'",
           "group": "navigation@10"
         },
         {
           "command": "tabManager.filter.errors",
-          "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/",
+          "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.filterMode != 'errors'",
           "group": "navigation@11"
         },
         {
-          "command": "tabManager.filter.untracked",
-          "title": "✓ Show Untracked Only",
+          "command": "tabManager.filter.clearErrors",
+          "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.filterMode == 'errors'",
+          "group": "navigation@11"
+        },
+        {
+          "command": "tabManager.filter.comparison",
+          "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.hasActiveComparison && tabManager.filterMode != 'comparison'",
+          "group": "navigation@12"
+        },
+        {
+          "command": "tabManager.filter.clearComparison",
+          "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.filterMode == 'comparison'",
+          "group": "navigation@12"
+        },
+        {
+          "command": "tabManager.filter.clearUntracked",
           "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.filterMode == 'untracked'",
           "group": "3_filter@1"
         },
         {
           "command": "tabManager.filter.untracked",
-          "title": "Show Untracked Only",
           "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.filterMode != 'untracked'",
           "group": "3_filter@1"
         },
         {
-          "command": "tabManager.filter.deleted",
-          "title": "✓ Show Deleted Only",
+          "command": "tabManager.filter.clearDeleted",
           "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.filterMode == 'deleted'",
           "group": "3_filter@2"
         },
         {
           "command": "tabManager.filter.deleted",
-          "title": "Show Deleted Only",
           "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.filterMode != 'deleted'",
           "group": "3_filter@2"
         },
         {
-          "command": "tabManager.filter.tabsOnly",
-          "title": "✓ Show Open Tabs Only",
+          "command": "tabManager.filter.clearTabsOnly",
           "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.filterMode == 'tabsOnly'",
           "group": "3_filter@3"
         },
         {
           "command": "tabManager.filter.tabsOnly",
-          "title": "Show Open Tabs Only",
           "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.filterMode != 'tabsOnly'",
           "group": "3_filter@3"
         },
         {
-          "command": "tabManager.filter.unsaved",
-          "title": "✓ Show Unsaved Only",
+          "command": "tabManager.filter.clearUnsaved",
           "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.filterMode == 'unsaved'",
           "group": "3_filter@4"
         },
         {
           "command": "tabManager.filter.unsaved",
-          "title": "Show Unsaved Only",
           "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.filterMode != 'unsaved'",
           "group": "3_filter@4"
         },
         {
-          "command": "tabManager.filter.readOnly",
-          "title": "✓ Show Read-only Only",
+          "command": "tabManager.filter.clearReadOnly",
           "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.filterMode == 'readOnly'",
           "group": "3_filter@5"
         },
         {
           "command": "tabManager.filter.readOnly",
-          "title": "Show Read-only Only",
           "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.filterMode != 'readOnly'",
           "group": "3_filter@5"
         },
         {
-          "command": "tabManager.filter.prComments",
-          "title": "✓ Show PR Comments Only",
+          "command": "tabManager.filter.clearPrComments",
           "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.filterMode == 'prComments'",
           "group": "3_filter@6"
         },
         {
           "command": "tabManager.filter.prComments",
-          "title": "Show PR Comments Only",
           "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.filterMode != 'prComments'",
           "group": "3_filter@6"
         },
         {
-          "command": "tabManager.filter.prFiles",
-          "title": "✓ Show PR Files Only",
+          "command": "tabManager.filter.clearPrFiles",
           "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.filterMode == 'prFiles'",
           "group": "3_filter@7"
         },
         {
           "command": "tabManager.filter.prFiles",
-          "title": "Show PR Files Only",
           "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.filterMode != 'prFiles'",
           "group": "3_filter@7"
         },
         {
-          "command": "tabManager.filter.clear",
-          "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.filterMode != 'none'",
+          "command": "tabManager.filter.clearComparison",
+          "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.filterMode == 'comparison'",
           "group": "3_filter@8"
         },
         {
-          "command": "tabManager.explorer.toggleFileSize",
-          "title": "✓ Show File Size",
+          "command": "tabManager.filter.comparison",
+          "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.hasActiveComparison && tabManager.filterMode != 'comparison'",
+          "group": "3_filter@8"
+        },
+        {
+          "command": "tabManager.filter.clear",
+          "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.filterMode != 'none'",
+          "group": "3_filter@9"
+        },
+        {
+          "command": "tabManager.explorer.hideFileSize",
           "when": "view == tabManagerExplorer && tabManager.explorerShowFileSize",
           "group": "0_display@1"
         },
         {
           "command": "tabManager.explorer.toggleFileSize",
-          "title": "Show File Size",
           "when": "view == tabManagerExplorer && !tabManager.explorerShowFileSize",
           "group": "0_display@1"
         },
         {
-          "command": "tabManager.explorer.toggleLineCount",
-          "title": "✓ Show Line Count",
+          "command": "tabManager.explorer.hideLineCount",
           "when": "view == tabManagerExplorer && tabManager.explorerShowLineCount",
           "group": "0_display@2"
         },
         {
           "command": "tabManager.explorer.toggleLineCount",
-          "title": "Show Line Count",
           "when": "view == tabManagerExplorer && !tabManager.explorerShowLineCount",
           "group": "0_display@2"
         },
         {
           "command": "tabManager.layout.byColumn",
-          "title": "✓ Show Tabs by Editor Column",
-          "when": "view == tabManagerView && tabManager.tabLayout == 'byColumn'",
-          "group": "0_layout@1"
-        },
-        {
-          "command": "tabManager.layout.byColumn",
-          "title": "Show Tabs by Editor Column",
           "when": "view == tabManagerView && tabManager.tabLayout != 'byColumn'",
           "group": "0_layout@1"
         },
         {
           "command": "tabManager.layout.merged",
-          "title": "✓ Show All Columns Combined",
-          "when": "view == tabManagerView && tabManager.tabLayout == 'merged'",
-          "group": "0_layout@2"
-        },
-        {
-          "command": "tabManager.layout.merged",
-          "title": "Show All Columns Combined",
           "when": "view == tabManagerView && tabManager.tabLayout != 'merged'",
           "group": "0_layout@2"
         },
         {
           "command": "tabManager.sort.nameAsc",
-          "title": "✓ Sort by Name (Ascending)",
-          "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.sortName == 'asc'",
-          "group": "1_sortName@1"
-        },
-        {
-          "command": "tabManager.sort.nameAsc",
-          "title": "Sort by Name (Ascending)",
           "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.sortName != 'asc'",
           "group": "1_sortName@1"
         },
         {
           "command": "tabManager.sort.nameDesc",
-          "title": "✓ Sort by Name (Descending)",
-          "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.sortName == 'desc'",
-          "group": "1_sortName@2"
-        },
-        {
-          "command": "tabManager.sort.nameDesc",
-          "title": "Sort by Name (Descending)",
           "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.sortName != 'desc'",
           "group": "1_sortName@2"
         },
         {
           "command": "tabManager.sort.nameNone",
-          "title": "✓ No Name Sort",
-          "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.sortName == 'none'",
-          "group": "1_sortName@3"
-        },
-        {
-          "command": "tabManager.sort.nameNone",
-          "title": "No Name Sort",
           "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.sortName != 'none'",
           "group": "1_sortName@3"
         },
         {
-          "command": "tabManager.sort.toggleType",
-          "title": "✓ Sort by Type",
+          "command": "tabManager.sort.stopType",
           "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && tabManager.sortType",
           "group": "2_sortType@1"
         },
         {
           "command": "tabManager.sort.toggleType",
-          "title": "Sort by Type",
           "when": "view =~ /^(tabManagerView|tabManagerExplorer)$/ && !tabManager.sortType",
           "group": "2_sortType@1"
         },
         {
-          "command": "tabManager.sort.toggleReadOnly",
-          "title": "✓ Sort by Read-only",
+          "command": "tabManager.sort.stopReadOnly",
           "when": "view == tabManagerView && tabManager.sortReadOnly",
           "group": "2_sortReadOnly@1"
         },
         {
           "command": "tabManager.sort.toggleReadOnly",
-          "title": "Sort by Read-only",
           "when": "view == tabManagerView && !tabManager.sortReadOnly",
           "group": "2_sortReadOnly@1"
         }

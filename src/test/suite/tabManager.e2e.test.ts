@@ -4,6 +4,12 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { GroupStore } from '../../groupStore';
+import { comparisonEntriesFromSnapshot } from '../../comparisonSource';
+import {
+  RENDERER_TOOLTIP_SCHEMA_KEY,
+  scheduleRendererTooltipReloadNotice,
+} from '../../extension';
+import { ProjectNode } from '../../projectProvider';
 
 type FilterMode =
   | 'none'
@@ -15,7 +21,8 @@ type FilterMode =
   | 'unsaved'
   | 'readOnly'
   | 'prComments'
-  | 'prFiles';
+  | 'prFiles'
+  | 'comparison';
 
 interface UserGroup {
   id: string;
@@ -57,9 +64,30 @@ interface TestApi {
   filterSource: {
     refresh(): Promise<void>;
     getUris(mode: FilterMode): vscode.Uri[];
+    getEntries(mode: FilterMode): Array<{ uri: vscode.Uri; status?: string }>;
     matches(uri: vscode.Uri, mode: FilterMode): boolean;
     isReadOnly(uri: vscode.Uri): boolean;
     isMissing(uri: vscode.Uri): boolean;
+    setComparisonFileSource(source: {
+      onDidChange: vscode.Event<void>;
+      getEntries(): readonly { uri: vscode.Uri; status?: string }[];
+    }): void;
+    setPullRequestFileSource(source: {
+      onDidChangePullRequestData: vscode.Event<void>;
+      getCommentedUris(): readonly vscode.Uri[];
+      getPullRequestFileUris(): readonly vscode.Uri[];
+      getPullRequestFileEntries?(): readonly { uri: vscode.Uri; status?: string }[];
+    }): void;
+  };
+  comparisonSource: {
+    readonly onDidChange: vscode.Event<void>;
+    getEntries(): readonly { uri: vscode.Uri; status?: string }[];
+  };
+  pullRequestCommentDecorations: {
+    readonly onDidChangePullRequestData: vscode.Event<void>;
+    getCommentedUris(): readonly vscode.Uri[];
+    getPullRequestFileUris(): readonly vscode.Uri[];
+    getPullRequestFileEntries(): readonly { uri: vscode.Uri; status?: string }[];
   };
 }
 
@@ -93,6 +121,146 @@ suite('Tab Manager E2E', () => {
     for (const command of expected) {
       assert.ok(commands.includes(command), `Expected command to be registered: ${command}`);
     }
+  });
+
+  test('uses supported native menu fields and an immediate default hover delay', () => {
+    const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+    assert.strictEqual(
+      packageJson.contributes.configurationDefaults?.['workbench.hover.delay'],
+      0,
+    );
+    assert.strictEqual(
+      vscode.workspace.getConfiguration('workbench').inspect<number>('hover.delay')?.defaultValue,
+      0,
+    );
+
+    const supportedMenuFields = new Set(['command', 'alt', 'when', 'group']);
+    for (const [menuId, items] of Object.entries(packageJson.contributes.menus)) {
+      for (const item of items as Array<Record<string, unknown>>) {
+        for (const field of Object.keys(item)) {
+          assert.ok(
+            supportedMenuFields.has(field),
+            `Unsupported menu field "${field}" in ${menuId}`,
+          );
+        }
+      }
+    }
+
+    const titleItems = packageJson.contributes.menus['view/title'] as Array<{
+      command: string;
+      when?: string;
+    }>;
+    const closeSelected = titleItems.find(
+      (item) => item.command === 'tabManager.closeSelected',
+    );
+    assert.ok(closeSelected?.when?.includes('tabManager.hasSelectedTabs'));
+    const showComparison = titleItems.find(
+      (item) => item.command === 'tabManager.filter.comparison' &&
+        item.when?.includes("filterMode != 'comparison'"),
+    );
+    assert.ok(showComparison?.when?.includes('tabManager.hasActiveComparison'));
+  });
+
+  test('shows the renderer tooltip reload notice once in production only', async () => {
+    assert.notStrictEqual(api.context.extensionMode, vscode.ExtensionMode.Production);
+    scheduleRendererTooltipReloadNotice(api.context);
+    await sleep(20);
+    assert.strictEqual(api.context.globalState.get(RENDERER_TOOLTIP_SCHEMA_KEY), undefined);
+
+    const dismissedContext = rendererTooltipContext();
+    let promptCount = 0;
+    let reloadCount = 0;
+    let storedVersionAtPrompt: unknown;
+    await withCommandStub(
+      (original, command, ...args) => {
+        if (command === 'workbench.action.reloadWindow') {
+          reloadCount++;
+          return undefined;
+        }
+        return original(command, ...args);
+      },
+      async () => {
+        await withWindowStub(
+          'showInformationMessage',
+          async (message: string, ...items: string[]) => {
+            promptCount++;
+            storedVersionAtPrompt = dismissedContext.globalState.get(
+              RENDERER_TOOLTIP_SCHEMA_KEY,
+            );
+            assert.strictEqual(
+              message,
+              'Header action tooltips were updated. Reload VS Code once to apply them.',
+            );
+            assert.deepStrictEqual(items, ['Reload Window']);
+            return undefined;
+          },
+          async () => {
+            scheduleRendererTooltipReloadNotice(dismissedContext);
+            scheduleRendererTooltipReloadNotice(dismissedContext);
+            await waitFor(() => promptCount === 1 || false, 'renderer tooltip reload notice');
+          },
+        );
+        scheduleRendererTooltipReloadNotice(dismissedContext);
+        await sleep(20);
+
+        const acceptedContext = rendererTooltipContext();
+        await withWindowStub(
+          'showInformationMessage',
+          async () => 'Reload Window',
+          async () => {
+            scheduleRendererTooltipReloadNotice(acceptedContext);
+            await waitFor(() => reloadCount === 1 || false, 'confirmed VS Code window reload');
+          },
+        );
+      },
+    );
+
+    assert.strictEqual(promptCount, 1);
+    assert.strictEqual(storedVersionAtPrompt, 1);
+    assert.strictEqual(reloadCount, 1);
+  });
+
+  test('executes state-specific clear, hide, and stop aliases safely', async () => {
+    const filterAliases: Array<[Exclude<FilterMode, 'none'>, string, string]> = [
+      ['modified', 'tabManager.filter.modified', 'tabManager.filter.clearModified'],
+      ['untracked', 'tabManager.filter.untracked', 'tabManager.filter.clearUntracked'],
+      ['deleted', 'tabManager.filter.deleted', 'tabManager.filter.clearDeleted'],
+      ['errors', 'tabManager.filter.errors', 'tabManager.filter.clearErrors'],
+      ['tabsOnly', 'tabManager.filter.tabsOnly', 'tabManager.filter.clearTabsOnly'],
+      ['unsaved', 'tabManager.filter.unsaved', 'tabManager.filter.clearUnsaved'],
+      ['readOnly', 'tabManager.filter.readOnly', 'tabManager.filter.clearReadOnly'],
+      ['prComments', 'tabManager.filter.prComments', 'tabManager.filter.clearPrComments'],
+      ['prFiles', 'tabManager.filter.prFiles', 'tabManager.filter.clearPrFiles'],
+      ['comparison', 'tabManager.filter.comparison', 'tabManager.filter.clearComparison'],
+    ];
+    for (const [mode, showCommand, clearCommand] of filterAliases) {
+      await vscode.commands.executeCommand(showCommand);
+      assert.strictEqual(api.store.getFilterMode(), mode);
+      await vscode.commands.executeCommand(clearCommand);
+      assert.strictEqual(api.store.getFilterMode(), 'none');
+      await vscode.commands.executeCommand(clearCommand);
+      assert.strictEqual(api.store.getFilterMode(), 'none');
+    }
+
+    await vscode.commands.executeCommand('tabManager.explorer.toggleFileSize');
+    await vscode.commands.executeCommand('tabManager.explorer.hideFileSize');
+    assert.strictEqual(api.store.getExplorerDisplayOptions().fileSize, false);
+    await vscode.commands.executeCommand('tabManager.explorer.hideFileSize');
+    assert.strictEqual(api.store.getExplorerDisplayOptions().fileSize, false);
+
+    await vscode.commands.executeCommand('tabManager.explorer.toggleLineCount');
+    await vscode.commands.executeCommand('tabManager.explorer.hideLineCount');
+    assert.strictEqual(api.store.getExplorerDisplayOptions().lineCount, false);
+
+    await vscode.commands.executeCommand('tabManager.sort.toggleType');
+    await vscode.commands.executeCommand('tabManager.sort.stopType');
+    assert.strictEqual(api.store.getSortState().type, false);
+    await vscode.commands.executeCommand('tabManager.sort.stopType');
+    assert.strictEqual(api.store.getSortState().type, false);
+
+    await vscode.commands.executeCommand('tabManager.sort.toggleReadOnly');
+    await vscode.commands.executeCommand('tabManager.sort.stopReadOnly');
+    assert.strictEqual(api.store.getSortState().readOnly, false);
   });
 
   test('does not fail node-scoped commands when invoked without tree context', async () => {
@@ -177,6 +345,11 @@ suite('Tab Manager E2E', () => {
     await openFile(zeta, vscode.ViewColumn.Beside);
     await waitFor(() => activeTabUri()?.toString() === zeta.toString(), 'zeta.txt to become active');
     const openAlphaNode = (await tabRoots(api)).find((node) => label(node) === 'alpha.ts');
+    assert.strictEqual((openAlphaNode as vscode.TreeItem).tooltip, `${alpha.fsPath}\nOpen Tab`);
+    assert.deepStrictEqual((openAlphaNode as vscode.TreeItem).accessibilityInformation, {
+      label: 'alpha.ts, Open Tab',
+      role: 'treeitem',
+    });
     await vscode.commands.executeCommand('tabManager.openTab', openAlphaNode);
     await waitFor(() => activeTabUri()?.toString() === alpha.toString(), 'alpha.ts to become active');
 
@@ -344,6 +517,8 @@ suite('Tab Manager E2E', () => {
       'tabManager.filter.tabsOnly',
       'tabManager.filter.clear',
       'tabManager.filter.unsaved',
+      'tabManager.filter.clear',
+      'tabManager.filter.comparison',
       'tabManager.filter.clear',
       'tabManager.sort.nameAsc',
       'tabManager.sort.nameDesc',
@@ -538,6 +713,7 @@ suite('Tab Manager E2E', () => {
       ['readOnly', 'tabManager.filter.readOnly'],
       ['prComments', 'tabManager.filter.prComments'],
       ['prFiles', 'tabManager.filter.prFiles'],
+      ['comparison', 'tabManager.filter.comparison'],
     ];
 
     for (const [mode, command] of modes) {
@@ -597,9 +773,127 @@ suite('Tab Manager E2E', () => {
     await vscode.commands.executeCommand('tabManager.filter.deleted');
     const deletedRoots = await explorerRoots(api);
     assert.ok(
-      deletedRoots.some((node) => label(node) === 'delete-me.txt' && description(node) === 'deleted'),
+      deletedRoots.some((node) =>
+        label(node) === strikeLabel('delete-me.txt') && description(node) === 'deleted'),
       'Expected deleted files to appear as ghost entries in the explorer.',
     );
+  });
+
+  test('tracks active comparisons and renders nested deleted ghosts for comparison and PR files', async function () {
+    this.timeout(30_000);
+
+    const changed = uri('alpha.ts');
+    const removed = uri('comparison-ghost/nested/removed.ts');
+    const normalizedComparisonEntries = comparisonEntriesFromSnapshot({
+      version: 1,
+      repoRoot: workspaceRoot,
+      changes: [
+        { status: 'M', path: 'alpha.ts' },
+        { status: 'D', path: 'comparison-ghost/nested/removed.ts' },
+        { status: 'D', path: '../outside.ts' },
+        { status: 'A', path: '/absolute.ts' },
+        { status: 'A', path: 'nested\\escape.ts' },
+      ],
+    });
+    assert.deepStrictEqual(
+      normalizedComparisonEntries.map((entry) => entry.uri.toString()),
+      [changed.toString(), removed.toString()],
+      'Comparison paths must stay beneath repoRoot.',
+    );
+    assert.deepStrictEqual(normalizedComparisonEntries[1].command, {
+      command: 'gitSimpleCompare.openComparisonFile',
+      title: 'Open Deleted File with Red Line Markers',
+      arguments: [{ repoRoot: workspaceRoot, path: 'comparison-ghost/nested/removed.ts' }],
+    });
+    await openFile(changed);
+
+    const comparisonEvent = new vscode.EventEmitter<void>();
+    let comparisonEntries: readonly {
+      uri: vscode.Uri;
+      status?: string;
+      command?: vscode.Command;
+    }[] = [
+      { uri: changed, status: 'M' },
+      {
+        uri: removed,
+        status: 'D',
+        command: {
+          command: 'gitSimpleCompare.openComparisonFile',
+          title: 'Open Deleted File with Red Line Markers',
+          arguments: [{ repoRoot: workspaceRoot, path: 'comparison-ghost/nested/removed.ts' }],
+        },
+      },
+    ];
+    api.filterSource.setComparisonFileSource({
+      onDidChange: comparisonEvent.event,
+      getEntries: () => comparisonEntries,
+    });
+
+    try {
+      await vscode.commands.executeCommand('tabManager.filter.comparison');
+      await waitFor(() => api.filterSource.matches(changed, 'comparison'), 'comparison source');
+      assert.deepStrictEqual(
+        api.filterSource.getEntries('comparison').map((entry) => entry.status),
+        ['M', 'D'],
+      );
+
+      const openTabs = await tabRoots(api);
+      assert.ok(labels(openTabs).includes('alpha.ts'), 'Open Tabs should use the comparison filter.');
+
+      const removedParent = uri('comparison-ghost/nested');
+      const nestedChildren = await explorerChildrenForUri(api, removedParent);
+      const deletedNode = nestedChildren.find((node) => description(node) === 'deleted');
+      assert.ok(deletedNode, 'Expected a deleted comparison file under ghost directories.');
+      assert.strictEqual(label(deletedNode), strikeLabel('removed.ts'));
+      assert.deepStrictEqual(
+        (deletedNode as vscode.TreeItem).accessibilityInformation,
+        {
+          label: 'removed.ts, deleted, Open Deleted File with Red Line Markers',
+          role: 'treeitem',
+        },
+      );
+      assert.strictEqual(
+        (deletedNode as vscode.TreeItem).tooltip,
+        `${removed.fsPath} (deleted)\nOpen Deleted File with Red Line Markers`,
+      );
+      assert.deepStrictEqual((deletedNode as vscode.TreeItem).command, {
+        command: 'gitSimpleCompare.openComparisonFile',
+        title: 'Open Deleted File with Red Line Markers',
+        arguments: [{ repoRoot: workspaceRoot, path: 'comparison-ghost/nested/removed.ts' }],
+      });
+
+      comparisonEntries = [{ uri: changed, status: 'M' }];
+      comparisonEvent.fire();
+      await waitFor(
+        () => !api.filterSource.matches(removed, 'comparison'),
+        'comparison change event to invalidate filter caches',
+      );
+    } finally {
+      api.filterSource.setComparisonFileSource(api.comparisonSource);
+      comparisonEvent.dispose();
+      await vscode.commands.executeCommand('tabManager.filter.clear');
+    }
+
+    const pullRequestEvent = new vscode.EventEmitter<void>();
+    api.filterSource.setPullRequestFileSource({
+      onDidChangePullRequestData: pullRequestEvent.event,
+      getCommentedUris: () => [],
+      getPullRequestFileUris: () => [removed],
+      getPullRequestFileEntries: () => [{ uri: removed, status: 'removed' }],
+    });
+    try {
+      await vscode.commands.executeCommand('tabManager.filter.prFiles');
+      const nestedChildren = await explorerChildrenForUri(api, uri('comparison-ghost/nested'));
+      assert.ok(
+        nestedChildren.some((node) =>
+          label(node) === strikeLabel('removed.ts') && description(node) === 'deleted'),
+        'Expected GitHub removed files to reuse generic deleted ghost rendering.',
+      );
+    } finally {
+      api.filterSource.setPullRequestFileSource(api.pullRequestCommentDecorations);
+      pullRequestEvent.dispose();
+      await vscode.commands.executeCommand('tabManager.filter.clear');
+    }
   });
 
   test('covers explorer file commands, clipboard commands, compare, terminal, and drag-drop', async function () {
@@ -611,6 +905,22 @@ suite('Tab Manager E2E', () => {
     assert.ok(initial.includes('folder'));
 
     const alpha = uri('alpha.ts');
+    const alphaNode = (await explorerRoots(api)).find((node) => label(node) === 'alpha.ts');
+    assert.strictEqual((alphaNode as vscode.TreeItem).tooltip, `${alpha.fsPath}\nOpen File`);
+    assert.deepStrictEqual((alphaNode as vscode.TreeItem).accessibilityInformation, {
+      label: 'alpha.ts, Open File',
+      role: 'treeitem',
+    });
+    assert.strictEqual((alphaNode as vscode.TreeItem).command?.title, 'Open File');
+    const projectNode = new ProjectNode({ uri: vscode.Uri.file(workspaceRoot) });
+    assert.strictEqual(
+      projectNode.tooltip,
+      `${path.basename(workspaceRoot)}\n${workspaceRoot}\nOpen Project in New Window`,
+    );
+    assert.deepStrictEqual(projectNode.accessibilityInformation, {
+      label: `${path.basename(workspaceRoot)}, Open Project in New Window`,
+      role: 'treeitem',
+    });
     await vscode.commands.executeCommand('tabManager.explorer.open', alpha);
     await waitFor(() => activeUri()?.toString() === alpha.toString(), 'explorer open to focus alpha.ts');
 
@@ -1167,6 +1477,10 @@ function description(node: unknown): string {
   return typeof value === 'string' ? value : '';
 }
 
+function strikeLabel(value: string): string {
+  return Array.from(value, (character) => `${character}\u0336`).join('');
+}
+
 function itemFor(target: vscode.Uri): vscode.TreeItem {
   const item = new vscode.TreeItem(path.basename(target.fsPath));
   item.resourceUri = target;
@@ -1345,6 +1659,28 @@ class FakeInputBox {
     this.hideEmitter.dispose();
     this.buttonEmitter.dispose();
   }
+}
+
+function rendererTooltipContext(): vscode.ExtensionContext {
+  const values = new Map<string, unknown>();
+  const globalState = {
+    get<T>(key: string, defaultValue?: T): T | undefined {
+      return values.has(key) ? values.get(key) as T : defaultValue;
+    },
+    update(key: string, value: unknown): Thenable<void> {
+      if (value === undefined) values.delete(key);
+      else values.set(key, value);
+      return Promise.resolve();
+    },
+    keys(): readonly string[] {
+      return [...values.keys()];
+    },
+    setKeysForSync(_keys: readonly string[]): void {},
+  };
+  return {
+    extensionMode: vscode.ExtensionMode.Production,
+    globalState,
+  } as unknown as vscode.ExtensionContext;
 }
 
 function failingStorageContext(): vscode.ExtensionContext {

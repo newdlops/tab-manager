@@ -69,6 +69,7 @@ const ALL_FILTER_MODES: readonly ActiveFilterMode[] = [
   'readOnly',
   'prComments',
   'prFiles',
+  'comparison',
 ];
 const GIT_FILTER_MODES: readonly ActiveFilterMode[] = [
   'modified',
@@ -88,6 +89,19 @@ export interface PullRequestFileSource {
   readonly onDidChangePullRequestData: vscode.Event<void>;
   getCommentedUris(): readonly vscode.Uri[];
   getPullRequestFileUris(): readonly vscode.Uri[];
+  getPullRequestFileEntries?(): readonly FilterFileEntry[];
+}
+
+export interface FilterFileEntry {
+  readonly uri: vscode.Uri;
+  readonly status?: string;
+  readonly command?: vscode.Command;
+}
+
+export interface ComparisonFileSource {
+  readonly onDidChange: vscode.Event<void>;
+  getEntries(): readonly FilterFileEntry[];
+  refresh?(): void;
 }
 
 export interface FilterSourceChangeEvent {
@@ -105,6 +119,8 @@ export class FilterSource implements vscode.Disposable {
   private readonly disposables: vscode.Disposable[] = [];
   private pullRequestFileSource: PullRequestFileSource | undefined;
   private pullRequestFileSourceDisposable: vscode.Disposable | undefined;
+  private comparisonFileSource: ComparisonFileSource | undefined;
+  private comparisonFileSourceDisposable: vscode.Disposable | undefined;
 
   private readonly uriCache = new Map<FilterMode, vscode.Uri[]>();
   private readonly matchSetCache = new Map<FilterMode, Set<string>>();
@@ -125,7 +141,10 @@ export class FilterSource implements vscode.Disposable {
     void this.populateReadOnly();
   }, 80);
 
-  constructor(pullRequestFileSource?: PullRequestFileSource) {
+  constructor(
+    pullRequestFileSource?: PullRequestFileSource,
+    comparisonFileSource?: ComparisonFileSource,
+  ) {
     this.dirtySignature = this.computeDirtySignature();
     this.disposables.push(
       this._onDidChange,
@@ -134,6 +153,7 @@ export class FilterSource implements vscode.Disposable {
       vscode.window.tabGroups.onDidChangeTabGroups((event) => this.handleTabGroupChange(event)),
     );
     if (pullRequestFileSource) this.setPullRequestFileSource(pullRequestFileSource);
+    if (comparisonFileSource) this.setComparisonFileSource(comparisonFileSource);
     void this.bootstrapGit();
     this.schedulePopulateReadOnly();
   }
@@ -147,6 +167,16 @@ export class FilterSource implements vscode.Disposable {
     this.queueChange(PULL_REQUEST_FILTER_MODES);
   }
 
+  /** Git Simple Compare의 활성 비교 소스를 교체하고 comparison 필터 캐시를 갱신한다. */
+  setComparisonFileSource(source: ComparisonFileSource | undefined): void {
+    this.comparisonFileSourceDisposable?.dispose();
+    this.comparisonFileSource = source;
+    this.comparisonFileSourceDisposable = source?.onDidChange(() =>
+      this.queueChange(['comparison']),
+    );
+    this.queueChange(['comparison']);
+  }
+
   async refresh(): Promise<void> {
     if (this.git) {
       await Promise.all(
@@ -157,6 +187,7 @@ export class FilterSource implements vscode.Disposable {
         ),
       );
     }
+    this.comparisonFileSource?.refresh?.();
     this.readOnlyCache.clear();
     this.invalidateCaches();
     this._onDidChange.fire({
@@ -429,6 +460,19 @@ export class FilterSource implements vscode.Disposable {
     return computed;
   }
 
+  /** 필터가 가진 URI와 선택적 git 상태를 Explorer가 공통 처리할 수 있게 반환한다. */
+  getEntries(mode: FilterMode): FilterFileEntry[] {
+    if (mode === 'comparison') return [...(this.comparisonFileSource?.getEntries() ?? [])];
+    if (mode === 'prFiles') {
+      const entries = this.pullRequestFileSource?.getPullRequestFileEntries?.();
+      if (entries) return [...entries];
+    }
+    return this.getUris(mode).map((uri) => ({
+      uri,
+      status: mode === 'deleted' ? 'D' : undefined,
+    }));
+  }
+
   private computeUris(mode: FilterMode): vscode.Uri[] {
     if (mode === 'none') return [];
     if (mode === 'errors') {
@@ -460,6 +504,9 @@ export class FilterSource implements vscode.Disposable {
     }
     if (mode === 'prFiles') {
       return [...(this.pullRequestFileSource?.getPullRequestFileUris() ?? [])];
+    }
+    if (mode === 'comparison') {
+      return [...(this.comparisonFileSource?.getEntries() ?? [])].map((entry) => entry.uri);
     }
     if (mode === 'readOnly') {
       const seen = new Set<string>();
@@ -502,6 +549,7 @@ export class FilterSource implements vscode.Disposable {
 
   dispose(): void {
     this.pullRequestFileSourceDisposable?.dispose();
+    this.comparisonFileSourceDisposable?.dispose();
     for (const d of this.repoDisposables.values()) d.dispose();
     this.repoDisposables.clear();
     for (const d of this.disposables) d.dispose();
