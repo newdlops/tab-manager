@@ -52,10 +52,12 @@ interface TestApi {
     getExplorerDisplayOptions(): ExplorerDisplayOptions;
   };
   tabProvider: {
+    readonly onDidChangeTreeData: vscode.Event<unknown | undefined>;
     refresh(): void;
     getChildren(element?: unknown): unknown[] | Thenable<unknown[]>;
   };
   explorerProvider: {
+    readonly onDidChangeTreeData: vscode.Event<unknown | undefined>;
     refresh(): void;
     getChildren(element?: unknown): unknown[] | Thenable<unknown[]>;
     handleDrag(source: readonly unknown[], dataTransfer: vscode.DataTransfer): void;
@@ -362,6 +364,63 @@ suite('Tab Manager E2E', () => {
     await openFile(zeta);
     await vscode.commands.executeCommand('tabManager.closeTab', staleZetaNode);
     await waitFor(() => !hasOpenTab(zeta), 'reopened zeta.txt tab to close from a stale tree node');
+  });
+
+  test('refreshes changed tab metadata without a manual tree refresh', async () => {
+    const target = uri('alpha.ts');
+    await openFile(target);
+    await sleep(150);
+
+    let treeChanges = 0;
+    const subscription = api.tabProvider.onDidChangeTreeData(() => treeChanges++);
+    try {
+      await editOpenDocument(target, '// live unsaved state\n');
+      await waitFor(() => treeChanges > 0 || false, 'tab tree change after editing a tab');
+
+      const nodes = [...(await api.tabProvider.getChildren(undefined))];
+      const targetNode = nodes.find((node) => label(node) === 'alpha.ts');
+      assert.ok(targetNode, 'Expected alpha.ts in the tab tree.');
+      assert.ok(
+        description(targetNode).split(' · ').includes('unsaved'),
+        'Expected the tab tree to show the unsaved state without a manual refresh.',
+      );
+    } finally {
+      subscription.dispose();
+      await vscode.window.activeTextEditor?.document.save();
+    }
+  });
+
+  test('tracks an externally deleted open file outside expanded explorer folders', async () => {
+    const directory = uri('live-file-state');
+    const target = uri('live-file-state/external-delete.txt');
+    fs.mkdirSync(directory.fsPath, { recursive: true });
+    fs.writeFileSync(target.fsPath, 'live\n');
+    await openFile(target);
+    await sleep(150);
+    assert.strictEqual(api.filterSource.isMissing(target), false);
+
+    let treeChanges = 0;
+    const subscription = api.tabProvider.onDidChangeTreeData(() => treeChanges++);
+    try {
+      fs.rmSync(target.fsPath);
+      await waitFor(
+        () => api.filterSource.isMissing(target),
+        'external deletion to invalidate the cached open-file state',
+      );
+      await waitFor(() => treeChanges > 0 || false, 'tab tree change after external deletion');
+
+      const nodes = [...(await api.tabProvider.getChildren(undefined))];
+      const targetNode = nodes.find((node) => label(node) === 'external-delete.txt');
+      assert.ok(targetNode, 'Expected the deleted file to remain represented by its open tab.');
+      assert.ok(
+        description(targetNode).split(' · ').includes('missing'),
+        'Expected the open tab to show the missing state without expanding its Explorer folder.',
+      );
+    } finally {
+      subscription.dispose();
+      await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
+      fs.rmSync(directory.fsPath, { recursive: true, force: true });
+    }
   });
 
   test('keeps the tab view in sync while many tabs are opened and closed', async function () {
@@ -685,12 +744,27 @@ suite('Tab Manager E2E', () => {
       '8 B · 2 lines',
     );
 
+    await sleep(150);
+    let treeChanges = 0;
+    const subscription = api.explorerProvider.onDidChangeTreeData(() => treeChanges++);
+    try {
+      fs.appendFileSync(target.fsPath, 'three\n');
+      await waitFor(() => treeChanges > 0 || false, 'explorer tree change after file content update');
+      await waitFor(async () => {
+        const nodes = [...(await api.explorerProvider.getChildren(undefined))];
+        const node = nodes.find((candidate) => label(candidate) === 'metadata.txt');
+        return node && description(node) === '14 B · 3 lines' ? true : false;
+      }, 'live file metadata update without a manual explorer refresh');
+    } finally {
+      subscription.dispose();
+    }
+
     await vscode.commands.executeCommand('tabManager.explorer.toggleFileSize');
     assert.deepStrictEqual(api.store.getExplorerDisplayOptions(), {
       fileSize: false,
       lineCount: true,
     });
-    assert.strictEqual(description(await waitForExplorerNode(api, 'metadata.txt')), '2 lines');
+    assert.strictEqual(description(await waitForExplorerNode(api, 'metadata.txt')), '3 lines');
 
     await vscode.commands.executeCommand('tabManager.explorer.toggleLineCount');
     assert.deepStrictEqual(api.store.getExplorerDisplayOptions(), {

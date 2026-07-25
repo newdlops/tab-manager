@@ -66,7 +66,9 @@ export function activate(context: vscode.ExtensionContext) {
 
   const scheduleTabRefresh = debounce(() => provider.refresh(), 30);
   const scheduleTabRefreshForTabs = (event: vscode.TabChangeEvent) => {
-    if (event.opened.length > 0 || event.closed.length > 0) scheduleTabRefresh();
+    if (event.opened.length > 0 || event.closed.length > 0 || event.changed.length > 0) {
+      scheduleTabRefresh();
+    }
   };
   const scheduleTabRefreshForGroups = (event: vscode.TabGroupChangeEvent) => {
     if (event.opened.length > 0 || event.closed.length > 0) scheduleTabRefresh();

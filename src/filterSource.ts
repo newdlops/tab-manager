@@ -110,6 +110,8 @@ export interface FilterSourceChangeEvent {
   readonly affectsDirtyDecorations: boolean;
 }
 
+export type FileSystemChangeKind = 'created' | 'changed' | 'deleted';
+
 export class FilterSource implements vscode.Disposable {
   private readonly _onDidChange = new vscode.EventEmitter<FilterSourceChangeEvent>();
   readonly onDidChange = this._onDidChange.event;
@@ -126,7 +128,10 @@ export class FilterSource implements vscode.Disposable {
   private readonly matchSetCache = new Map<FilterMode, Set<string>>();
 
   private dirtySetCache?: Set<string>;
+  private openTabUriKeyCache?: Set<string>;
   private readonly readOnlyCache = new Map<string, boolean>();
+  private readonly invalidatedReadOnlyKeys = new Set<string>();
+  private readonly missingCache = new Map<string, boolean>();
   private readonlyPopulationToken = 0;
   private dirtySignature = '';
   private readonly pendingModes = new Set<ActiveFilterMode>();
@@ -178,6 +183,7 @@ export class FilterSource implements vscode.Disposable {
   }
 
   async refresh(): Promise<void> {
+    this.readonlyPopulationToken++;
     if (this.git) {
       await Promise.all(
         this.git.repositories.map((r) =>
@@ -189,6 +195,9 @@ export class FilterSource implements vscode.Disposable {
     }
     this.comparisonFileSource?.refresh?.();
     this.readOnlyCache.clear();
+    this.invalidatedReadOnlyKeys.clear();
+    this.missingCache.clear();
+    this.openTabUriKeyCache = undefined;
     this.invalidateCaches();
     this._onDidChange.fire({
       modes: ALL_FILTER_MODES,
@@ -259,14 +268,39 @@ export class FilterSource implements vscode.Disposable {
   }
 
   isMissing(uri: vscode.Uri): boolean {
-    return isMissingWorkspaceFile(uri);
+    if (uri.scheme !== 'file' || !vscode.workspace.getWorkspaceFolder(uri)) return false;
+    const key = uri.toString();
+    const cached = this.missingCache.get(key);
+    if (cached !== undefined) return cached;
+    const missing = !fs.existsSync(uri.fsPath);
+    this.missingCache.set(key, missing);
+    return missing;
   }
 
-  notifyFileSystemChange(uri: vscode.Uri): boolean {
-    if (!this.hasOpenTabUri(uri)) return false;
-    this.readOnlyCache.delete(uri.toString());
-    this.queueChange(['untracked', 'readOnly'], { affectsOpenTabMetadata: true });
-    this.schedulePopulateReadOnly();
+  notifyFileSystemChange(
+    uri: vscode.Uri,
+    kind: FileSystemChangeKind = 'changed',
+  ): boolean {
+    const key = uri.toString();
+    if (!this.getOpenTabUriKeySet().has(key)) return false;
+
+    if (kind === 'created' || kind === 'deleted') {
+      this.missingCache.set(key, kind === 'deleted');
+      const modes: ActiveFilterMode[] = ['untracked'];
+      if (kind === 'deleted') {
+        if (this.readOnlyCache.get(key) === true) modes.push('readOnly');
+        this.readOnlyCache.set(key, false);
+        this.invalidatedReadOnlyKeys.delete(key);
+      } else {
+        this.invalidatedReadOnlyKeys.add(key);
+        this.schedulePopulateReadOnly();
+      }
+      this.queueChange(modes, { affectsOpenTabMetadata: true });
+    } else {
+      this.missingCache.set(key, false);
+      this.invalidatedReadOnlyKeys.add(key);
+      this.schedulePopulateReadOnly();
+    }
     return true;
   }
 
@@ -282,7 +316,7 @@ export class FilterSource implements vscode.Disposable {
         if (live.has(key)) continue;
         live.add(key);
         if (READONLY_SCHEMES.has(uri.scheme)) continue;
-        if (this.readOnlyCache.has(key)) continue;
+        if (this.readOnlyCache.has(key) && !this.invalidatedReadOnlyKeys.has(key)) continue;
         toStat.push(uri);
       }
     }
@@ -291,8 +325,12 @@ export class FilterSource implements vscode.Disposable {
     for (const key of [...this.readOnlyCache.keys()]) {
       if (!live.has(key)) {
         this.readOnlyCache.delete(key);
+        this.invalidatedReadOnlyKeys.delete(key);
         changed = true;
       }
+    }
+    for (const key of [...this.missingCache.keys()]) {
+      if (!live.has(key)) this.missingCache.delete(key);
     }
 
     if (toStat.length > 0) {
@@ -300,11 +338,13 @@ export class FilterSource implements vscode.Disposable {
         toStat.map(async (uri) => {
           const ro = await this.statReadOnly(uri);
           if (token !== this.readonlyPopulationToken) return;
-          const prev = this.readOnlyCache.get(uri.toString());
+          const key = uri.toString();
+          const prev = this.readOnlyCache.get(key);
           if (prev !== ro) {
-            this.readOnlyCache.set(uri.toString(), ro);
+            this.readOnlyCache.set(key, ro);
             changed = true;
           }
+          this.invalidatedReadOnlyKeys.delete(key);
         }),
       );
     }
@@ -317,6 +357,7 @@ export class FilterSource implements vscode.Disposable {
 
   private handleTabChange(event: vscode.TabChangeEvent): void {
     const structureChanged = event.opened.length > 0 || event.closed.length > 0;
+    if (structureChanged || event.changed.length > 0) this.openTabUriKeyCache = undefined;
     if (structureChanged) {
       this.queueChange(TAB_STRUCTURE_FILTER_MODES);
       this.schedulePopulateReadOnly();
@@ -329,6 +370,7 @@ export class FilterSource implements vscode.Disposable {
   private handleTabGroupChange(event: vscode.TabGroupChangeEvent): void {
     const structureChanged = event.opened.length > 0 || event.closed.length > 0;
     if (!structureChanged) return;
+    this.openTabUriKeyCache = undefined;
     this.queueChange(TAB_STRUCTURE_FILTER_MODES);
     this.schedulePopulateReadOnly();
   }
@@ -390,14 +432,18 @@ export class FilterSource implements vscode.Disposable {
     return uris;
   }
 
-  private hasOpenTabUri(uri: vscode.Uri): boolean {
-    const key = uri.toString();
-    for (const group of vscode.window.tabGroups.all) {
-      for (const tab of group.tabs) {
-        if (resourceUriFor(tab)?.toString() === key) return true;
+  private getOpenTabUriKeySet(): ReadonlySet<string> {
+    if (!this.openTabUriKeyCache) {
+      const keys = new Set<string>();
+      for (const group of vscode.window.tabGroups.all) {
+        for (const tab of group.tabs) {
+          const uri = resourceUriFor(tab);
+          if (uri) keys.add(uri.toString());
+        }
       }
+      this.openTabUriKeyCache = keys;
     }
-    return false;
+    return this.openTabUriKeyCache;
   }
 
   private async bootstrapGit(): Promise<void> {
@@ -554,12 +600,6 @@ export class FilterSource implements vscode.Disposable {
     this.repoDisposables.clear();
     for (const d of this.disposables) d.dispose();
   }
-}
-
-function isMissingWorkspaceFile(uri: vscode.Uri): boolean {
-  if (uri.scheme !== 'file') return false;
-  if (!vscode.workspace.getWorkspaceFolder(uri)) return false;
-  return !fs.existsSync(uri.fsPath);
 }
 
 function gitStatusFor(mode: FilterMode): GitStatus | undefined {
