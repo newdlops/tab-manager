@@ -10,7 +10,12 @@ import { formatOpenError } from './openResource';
 import { resourceUriFor } from './tabUtils';
 import { debounce, fileContextValue } from './util';
 
-export type FileTreeNode = WorkspaceFolderNode | DirectoryNode | FileNode | PendingNode;
+export type FileTreeNode =
+  | WorkspaceFolderNode
+  | DirectoryNode
+  | FileNode
+  | PendingNode
+  | ExplorerErrorNode;
 export type PendingKind = 'file' | 'folder';
 
 interface FileNodeMetadata {
@@ -50,6 +55,26 @@ export class PendingNode extends vscode.TreeItem {
   }
 }
 
+export class ExplorerErrorNode extends vscode.TreeItem {
+  constructor(
+    public readonly folderUri: vscode.Uri,
+    errorMessage: string,
+  ) {
+    const folderName = baseName(folderUri) || folderUri.authority || folderUri.scheme;
+    super('Unable to read folder', vscode.TreeItemCollapsibleState.None);
+    this.description = folderName;
+    this.id = `error:${folderUri.toString()}`;
+    this.contextValue = 'explorerError';
+    this.iconPath = new vscode.ThemeIcon('error');
+    const location = folderUri.scheme === 'file' ? folderUri.fsPath : folderUri.toString();
+    this.tooltip = `${location}\n${errorMessage}`;
+    this.accessibilityInformation = {
+      label: `Unable to read folder ${folderName}. ${errorMessage}`,
+      role: 'treeitem',
+    };
+  }
+}
+
 export class FileNode extends vscode.TreeItem {
   constructor(
     public readonly uri: vscode.Uri,
@@ -75,10 +100,14 @@ export class FileNode extends vscode.TreeItem {
     } else {
       this.contextValue = fileContextValue(baseName(uri));
       this.tooltip = `${uri.fsPath}\nOpen File`;
-      this.accessibilityInformation = { label: `${name}, Open File`, role: 'treeitem' };
-      if (metadata.descriptionParts?.length) {
-        this.description = metadata.descriptionParts.join(' · ');
+      const descriptionParts = metadata.descriptionParts ?? [];
+      if (descriptionParts.length) {
+        this.description = descriptionParts.join(' · ');
       }
+      this.accessibilityInformation = {
+        label: [name, uri.fsPath, ...descriptionParts, 'Open File'].join(', '),
+        role: 'treeitem',
+      };
       this.command = {
         command: 'tabManager.explorer.open',
         title: 'Open File',
@@ -319,6 +348,7 @@ export class ExplorerProvider
   getParent(element: FileTreeNode): FileTreeNode | undefined {
     if (element instanceof WorkspaceFolderNode) return undefined;
     if (element instanceof PendingNode) return undefined;
+    if (element instanceof ExplorerErrorNode) return undefined;
     const uri = element instanceof DirectoryNode ? element.uri : element.uri;
     const parent = parentUri(uri);
     if (parent.toString() === uri.toString()) return undefined;
@@ -348,7 +378,11 @@ export class ExplorerProvider
       const folders = vscode.workspace.workspaceFolders ?? [];
       if (folders.length === 0) return [];
       if (folders.length === 1) return this.readDirectory(folders[0].uri, mode);
-      return folders.map((folder) => this.workspaceFolderNode(folder));
+      if (mode === 'none') return folders.map((folder) => this.workspaceFolderNode(folder));
+      this.ensureCache(mode);
+      return folders
+        .filter((folder) => this.cache!.ancestors.has(folder.uri.toString()))
+        .map((folder) => this.workspaceFolderNode(folder));
     }
     if (element instanceof WorkspaceFolderNode) {
       this.workspaceFolderNodes.set(element.folder.uri.toString(), element);
@@ -367,7 +401,10 @@ export class ExplorerProvider
     if (!entries) {
       try {
         entries = await vscode.workspace.fs.readDirectory(folder);
-      } catch {
+      } catch (error) {
+        if (!this.isDeletedGhostDirectory(folder, mode)) {
+          return [new ExplorerErrorNode(folder, formatOpenError(error))];
+        }
         entries = [];
       }
       this.dirCache.set(cacheKey, entries);
@@ -739,6 +776,14 @@ export class ExplorerProvider
       deletedDirectoriesByParent,
     };
   }
+
+  private isDeletedGhostDirectory(uri: vscode.Uri, mode: FilterMode): boolean {
+    this.ensureCache(mode);
+    for (const directories of this.cache?.deletedDirectoriesByParent?.values() ?? []) {
+      if (directories.some((directory) => directory.toString() === uri.toString())) return true;
+    }
+    return false;
+  }
 }
 
 /** 삭제 상태 표기를 공급자별 문자열 차이와 무관하게 판별한다. */
@@ -855,6 +900,7 @@ function nodeUri(node: FileTreeNode): vscode.Uri | undefined {
 async function resolveDropDestination(
   target: FileTreeNode | undefined,
 ): Promise<vscode.Uri | undefined> {
+  if (target instanceof ExplorerErrorNode) return undefined;
   if (target instanceof WorkspaceFolderNode) return target.folder.uri;
   if (target instanceof DirectoryNode) return target.uri;
   if (target instanceof FileNode) return parentUri(target.uri);

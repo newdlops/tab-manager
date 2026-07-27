@@ -23,15 +23,15 @@ A VS Code extension that brings grouping, filtering, and sorting to open tabs �
 
 ### Extended Explorer (Explorer sidebar)
 
-- **View title** shows the workspace name (or the `.code-workspace` filename for multi-root)
+- **View title** is `Extended Explorer`; the current workspace name is shown in the view description
 - **Tree root** — a single-folder workspace shows its contents directly (like built-in Explorer); a multi-root workspace shows each folder as a root node
 - **Inline New File / New Folder** — a placeholder item appears inside the target folder and updates live as you type in the input box
 - **Deleted files** appear as ghost entries (greyed out, `deleted` label) when the Deleted filter is on
-- **Refresh** forces a `git status` rescan on every repository before refreshing
+- **Refresh** shows view-scoped progress while it forces a `git status` rescan on every repository before refreshing
 - **Optional metadata** shows file size and line count next to file names
 - **Cut / Copy / Paste** works across the OS clipboard — paste files copied in Finder, File Explorer, or another VS Code window, and files you copy here can be pasted into those apps too (`Ctrl/Cmd+X`, `Ctrl/Cmd+C`, `Ctrl/Cmd+V`)
 - **Context menu**: Open / Open to Side / Reveal in File Explorer / Open in Integrated Terminal / Cut / Copy / Paste / Copy Path / Copy Relative Path / Compare This File with Branch / Rename / Delete / New File / New Folder
-- **Title bar**: New File, New Folder, Refresh, metadata toggles, filter buttons, sort options
+- **Title bar**: New File, New Folder, Reveal Active File, and Refresh; metadata, filters, sorting, and expanded-tree actions are in the overflow menu
 
 ### Projects (Explorer sidebar)
 
@@ -56,7 +56,8 @@ A VS Code extension that brings grouping, filtering, and sorting to open tabs �
 
 - Only one filter is active at a time; clicking the active filter turns it off
 - Active filter is shown in each view's description (`Filter: Modified`)
-- `Modified` and `Errors` are inline title-bar buttons; other filters live in the overflow `...` menu
+- When an active filter has no matches, the empty state offers `Clear Filter`
+- All filters live in the overflow `...` menu so the title bar stays focused on common actions
 
 ### Sort
 
@@ -64,6 +65,7 @@ A VS Code extension that brings grouping, filtering, and sorting to open tabs �
 - **By type** (file extension): on/off toggle
 - Both can be on together — tabs/files group by extension first, then by name
 - Directories always come first in the Explorer (like built-in)
+- The current non-default sort state is shown in each view's description
 
 ## Installation
 
@@ -98,7 +100,7 @@ All commands are discoverable in the Command Palette under `Tab Manager:` / `Ext
 
 ## Known limitations
 
-- VS Code does not expose an API for inline editing in tree views. New File / New Folder uses a top-positioned input box synced live with a placeholder item in the tree — the closest approximation to the built-in Explorer's inline input
+- VS Code does not expose an API for inline editing in tree views. New File / New Folder uses a top-positioned input box synced live with a placeholder item in the tree; file-system failures keep the entered name visible for correction and retry
 - The built-in Explorer cannot be replaced or removed programmatically. The Extended Explorer is contributed alongside it with `"order": 0` so it tends to appear first; if it does not, drag the section header above the built-in Explorer once and VS Code remembers the order
 - The `Errors` filter reflects only diagnostics that language servers have already produced — refreshing cannot force language servers to scan unopened files
 - Tabs are focused by editor group/index. If a tab was closed before the tree refreshes, it may no longer be available to reveal

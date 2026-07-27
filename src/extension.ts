@@ -30,12 +30,36 @@ const FILTER_CLEAR_COMMAND_ALIASES = {
   'tabManager.filter.clearComparison': 'comparison',
 } as const satisfies Record<string, Exclude<FilterMode, 'none'>>;
 
-export const RENDERER_TOOLTIP_SCHEMA_KEY = 'tabManager.rendererTooltipSchemaVersion';
-const RENDERER_TOOLTIP_SCHEMA_VERSION = 1;
-const RENDERER_TOOLTIP_NOTICE_MESSAGE =
-  'Header action tooltips were updated. Reload VS Code once to apply them.';
-const RELOAD_WINDOW_ACTION = 'Reload Window';
-const rendererTooltipNoticeContexts = new WeakSet<vscode.ExtensionContext>();
+const FILTER_LABELS: Record<Exclude<FilterMode, 'none'>, string> = {
+  modified: 'Modified',
+  untracked: 'Untracked',
+  deleted: 'Deleted',
+  errors: 'Errors',
+  tabsOnly: 'Open Tabs',
+  unsaved: 'Unsaved',
+  readOnly: 'Read-only',
+  prComments: 'PR Comments',
+  prFiles: 'PR Files',
+  comparison: 'Comparison',
+};
+
+function filterDescription(mode: FilterMode): string | undefined {
+  return mode === 'none' ? undefined : `Filter: ${FILTER_LABELS[mode]}`;
+}
+
+function sortDescription(sort: SortState, includeReadOnly: boolean): string | undefined {
+  const parts: string[] = [];
+  if (sort.name === 'asc') parts.push('Name A–Z');
+  if (sort.name === 'desc') parts.push('Name Z–A');
+  if (sort.type) parts.push('Type');
+  if (includeReadOnly && sort.readOnly) parts.push('Read-only first');
+  return parts.length > 0 ? `Sort: ${parts.join(', ')}` : undefined;
+}
+
+function joinDescription(parts: Array<string | undefined>): string | undefined {
+  const description = parts.filter((part): part is string => !!part).join(' · ');
+  return description || undefined;
+}
 
 export function activate(context: vscode.ExtensionContext) {
   const store = new GroupStore(context);
@@ -120,14 +144,21 @@ export function activate(context: vscode.ExtensionContext) {
   let lastExplorerDisplayContext: ExplorerDisplayOptions | undefined;
   let lastHasSelectedTabs: boolean | undefined;
   let lastHasActiveComparison: boolean | undefined;
+  let lastHasActiveFilter: boolean | undefined;
   const updateViewDescriptions = () => {
     const mode = store.getFilterMode();
     const layout = store.getTabLayoutMode();
-    const filterDesc = mode === 'none' ? undefined : `Filter: ${capitalize(mode)}`;
-    filesView.description = filterDesc;
-    view.description = [layout === 'byColumn' ? 'By Column' : undefined, filterDesc]
-      .filter((part): part is string => !!part)
-      .join(' · ') || undefined;
+    const sort = store.getSortState();
+    view.description = joinDescription([
+      layout === 'byColumn' ? 'By Column' : 'All Columns',
+      filterDescription(mode),
+      sortDescription(sort, true),
+    ]);
+    filesView.description = joinDescription([
+      vscode.workspace.name,
+      filterDescription(mode),
+      sortDescription(sort, false),
+    ]);
   };
   const syncSortContext = () => {
     const s = store.getSortState();
@@ -143,12 +174,22 @@ export function activate(context: vscode.ExtensionContext) {
     vscode.commands.executeCommand('setContext', 'tabManager.sortName', s.name);
     vscode.commands.executeCommand('setContext', 'tabManager.sortType', s.type);
     vscode.commands.executeCommand('setContext', 'tabManager.sortReadOnly', s.readOnly);
+    updateViewDescriptions();
   };
   const syncFilterState = () => {
     const mode = store.getFilterMode();
     if (lastFilterContext !== mode) {
       lastFilterContext = mode;
       vscode.commands.executeCommand('setContext', 'tabManager.filterMode', mode);
+    }
+    const hasActiveFilter = mode !== 'none';
+    if (lastHasActiveFilter !== hasActiveFilter) {
+      lastHasActiveFilter = hasActiveFilter;
+      void vscode.commands.executeCommand(
+        'setContext',
+        'tabManager.hasActiveFilter',
+        hasActiveFilter,
+      );
     }
     updateViewDescriptions();
   };
@@ -181,9 +222,6 @@ export function activate(context: vscode.ExtensionContext) {
       options.lineCount,
     );
   };
-  const syncExplorerTitle = () => {
-    filesView.title = vscode.workspace.name ?? 'Workspace';
-  };
   const syncSelectedTabsContext = () => {
     const hasSelectedTabs = view.selection.some((node) => node instanceof TabNode);
     if (lastHasSelectedTabs === hasSelectedTabs) return;
@@ -204,7 +242,6 @@ export function activate(context: vscode.ExtensionContext) {
       hasActiveComparison,
     );
   };
-  syncExplorerTitle();
   syncSortContext();
   syncFilterState();
   syncLayoutState();
@@ -237,7 +274,7 @@ export function activate(context: vscode.ExtensionContext) {
     comparisonSource.onDidChange(syncActiveComparisonContext),
     filesView.onDidCollapseElement((event) => explorerProvider.unwatchNode(event.element)),
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
-      syncExplorerTitle();
+      updateViewDescriptions();
       explorerProvider.refresh();
     }),
 
@@ -412,8 +449,6 @@ export function activate(context: vscode.ExtensionContext) {
     ),
   );
 
-  scheduleRendererTooltipReloadNotice(context);
-
   if (process.env.TAB_MANAGER_E2E === '1') {
     return {
       store,
@@ -429,55 +464,6 @@ export function activate(context: vscode.ExtensionContext) {
       explorerView: filesView,
       projectsView,
     };
-  }
-}
-
-/**
- * 갱신된 헤더 tooltip listener가 Workbench renderer에 반영되도록 production에서만 안내한다.
- * activation을 막지 않으며, schema 버전을 먼저 저장해 같은 안내가 반복되지 않게 한다.
- */
-export function scheduleRendererTooltipReloadNotice(context: vscode.ExtensionContext): void {
-  if (context.extensionMode !== vscode.ExtensionMode.Production) return;
-  if (rendererTooltipNoticeContexts.has(context)) return;
-  const shownVersion = context.globalState.get<number>(RENDERER_TOOLTIP_SCHEMA_KEY, 0);
-  if (shownVersion >= RENDERER_TOOLTIP_SCHEMA_VERSION) return;
-
-  rendererTooltipNoticeContexts.add(context);
-  void persistAndShowRendererTooltipNotice(context).catch((error) => {
-    console.error('Tab Manager could not show the renderer tooltip reload notice.', error);
-  });
-}
-
-/** schema 버전을 기록한 뒤 사용자 선택이 있을 때만 현재 VS Code 창을 다시 연다. */
-async function persistAndShowRendererTooltipNotice(
-  context: vscode.ExtensionContext,
-): Promise<void> {
-  await context.globalState.update(RENDERER_TOOLTIP_SCHEMA_KEY, RENDERER_TOOLTIP_SCHEMA_VERSION);
-  const action = await vscode.window.showInformationMessage(
-    RENDERER_TOOLTIP_NOTICE_MESSAGE,
-    RELOAD_WINDOW_ACTION,
-  );
-  if (action === RELOAD_WINDOW_ACTION) {
-    await vscode.commands.executeCommand('workbench.action.reloadWindow');
-  }
-}
-
-function capitalize(s: FilterMode): string {
-  switch (s) {
-    case 'tabsOnly':
-      return 'Tabs Only';
-    case 'unsaved':
-      return 'Unsaved';
-    case 'readOnly':
-      return 'Read-only';
-    case 'prComments':
-      return 'PR Comments';
-    case 'prFiles':
-      return 'PR Files';
-    case 'comparison':
-      return 'Comparison';
-    default:
-      return s.charAt(0).toUpperCase() + s.slice(1);
   }
 }
 

@@ -5,10 +5,7 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { GroupStore } from '../../groupStore';
 import { comparisonEntriesFromSnapshot } from '../../comparisonSource';
-import {
-  RENDERER_TOOLTIP_SCHEMA_KEY,
-  scheduleRendererTooltipReloadNotice,
-} from '../../extension';
+import { ExplorerErrorNode } from '../../explorerProvider';
 import { ProjectNode } from '../../projectProvider';
 
 type FilterMode =
@@ -91,6 +88,9 @@ interface TestApi {
     getPullRequestFileUris(): readonly vscode.Uri[];
     getPullRequestFileEntries(): readonly { uri: vscode.Uri; status?: string }[];
   };
+  tabView: vscode.TreeView<unknown>;
+  explorerView: vscode.TreeView<unknown>;
+  projectsView: vscode.TreeView<unknown>;
 }
 
 const root = process.env.TAB_MANAGER_E2E_ROOT!;
@@ -125,16 +125,10 @@ suite('Tab Manager E2E', () => {
     }
   });
 
-  test('uses supported native menu fields and an immediate default hover delay', () => {
+  test('uses native menu fields and the planned view hierarchy', () => {
     const packageJson = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
-    assert.strictEqual(
-      packageJson.contributes.configurationDefaults?.['workbench.hover.delay'],
-      0,
-    );
-    assert.strictEqual(
-      vscode.workspace.getConfiguration('workbench').inspect<number>('hover.delay')?.defaultValue,
-      0,
-    );
+    assert.strictEqual(packageJson.contributes.configurationDefaults, undefined);
+    assert.strictEqual(packageJson.contributes.views.explorer[0].name, 'Extended Explorer');
 
     const supportedMenuFields = new Set(['command', 'alt', 'when', 'group']);
     for (const [menuId, items] of Object.entries(packageJson.contributes.menus)) {
@@ -151,75 +145,123 @@ suite('Tab Manager E2E', () => {
     const titleItems = packageJson.contributes.menus['view/title'] as Array<{
       command: string;
       when?: string;
+      group?: string;
     }>;
     const closeSelected = titleItems.find(
       (item) => item.command === 'tabManager.closeSelected',
     );
     assert.ok(closeSelected?.when?.includes('tabManager.hasSelectedTabs'));
-    const showComparison = titleItems.find(
-      (item) => item.command === 'tabManager.filter.comparison' &&
-        item.when?.includes("filterMode != 'comparison'"),
+    const showComparison = titleItems.find((item) =>
+      item.command === 'tabManager.filter.comparison' &&
+      item.when?.includes("filterMode != 'comparison'"),
     );
     assert.ok(showComparison?.when?.includes('tabManager.hasActiveComparison'));
-  });
 
-  test('shows the renderer tooltip reload notice once in production only', async () => {
-    assert.notStrictEqual(api.context.extensionMode, vscode.ExtensionMode.Production);
-    scheduleRendererTooltipReloadNotice(api.context);
-    await sleep(20);
-    assert.strictEqual(api.context.globalState.get(RENDERER_TOOLTIP_SCHEMA_KEY), undefined);
-
-    const dismissedContext = rendererTooltipContext();
-    let promptCount = 0;
-    let reloadCount = 0;
-    let storedVersionAtPrompt: unknown;
-    await withCommandStub(
-      (original, command, ...args) => {
-        if (command === 'workbench.action.reloadWindow') {
-          reloadCount++;
-          return undefined;
-        }
-        return original(command, ...args);
-      },
-      async () => {
-        await withWindowStub(
-          'showInformationMessage',
-          async (message: string, ...items: string[]) => {
-            promptCount++;
-            storedVersionAtPrompt = dismissedContext.globalState.get(
-              RENDERER_TOOLTIP_SCHEMA_KEY,
-            );
-            assert.strictEqual(
-              message,
-              'Header action tooltips were updated. Reload VS Code once to apply them.',
-            );
-            assert.deepStrictEqual(items, ['Reload Window']);
-            return undefined;
-          },
-          async () => {
-            scheduleRendererTooltipReloadNotice(dismissedContext);
-            scheduleRendererTooltipReloadNotice(dismissedContext);
-            await waitFor(() => promptCount === 1 || false, 'renderer tooltip reload notice');
-          },
-        );
-        scheduleRendererTooltipReloadNotice(dismissedContext);
-        await sleep(20);
-
-        const acceptedContext = rendererTooltipContext();
-        await withWindowStub(
-          'showInformationMessage',
-          async () => 'Reload Window',
-          async () => {
-            scheduleRendererTooltipReloadNotice(acceptedContext);
-            await waitFor(() => reloadCount === 1 || false, 'confirmed VS Code window reload');
-          },
-        );
-      },
+    const navigation = titleItems.filter((item) => item.group?.startsWith('navigation'));
+    assert.deepStrictEqual(
+      navigation
+        .filter((item) => item.when?.includes('view == tabManagerView'))
+        .map((item) => item.command)
+        .sort(),
+      [
+        'tabManager.closeSelected',
+        'tabManager.createGroup',
+        'tabManager.layout.byColumn',
+        'tabManager.layout.merged',
+      ].sort(),
+    );
+    assert.deepStrictEqual(
+      navigation
+        .filter((item) => item.when?.includes('view == tabManagerExplorer'))
+        .map((item) => item.command)
+        .sort(),
+      [
+        'tabManager.explorer.newFile',
+        'tabManager.explorer.newFolder',
+        'tabManager.explorer.refresh',
+        'tabManager.explorer.revealActive',
+      ].sort(),
+    );
+    assert.ok(!navigation.some((item) => item.command.startsWith('tabManager.filter.')));
+    assert.strictEqual(
+      titleItems.filter((item) => item.command === 'tabManager.filter.comparison').length,
+      1,
+    );
+    assert.strictEqual(
+      titleItems.filter((item) => item.command === 'tabManager.filter.clearComparison').length,
+      1,
+    );
+    assert.ok(!titleItems.some((item) => item.command === 'tabManager.filter.clear'));
+    assert.strictEqual(
+      titleItems.find((item) => item.command === 'tabManager.explorer.refreshPullRequestComments')
+        ?.group,
+      '4_refresh@1',
+    );
+    assert.strictEqual(
+      titleItems.find((item) => item.command === 'tabManager.explorer.expandAll')?.group,
+      '5_tree@1',
     );
 
-    assert.strictEqual(promptCount, 1);
-    assert.strictEqual(storedVersionAtPrompt, 1);
-    assert.strictEqual(reloadCount, 1);
+    const filterOrder: Array<[string, string]> = [
+      ['modified', '3_filter@1'],
+      ['untracked', '3_filter@2'],
+      ['deleted', '3_filter@3'],
+      ['errors', '3_filter@4'],
+      ['tabsOnly', '3_filter@5'],
+      ['unsaved', '3_filter@6'],
+      ['readOnly', '3_filter@7'],
+      ['prComments', '3_filter@8'],
+      ['prFiles', '3_filter@9'],
+      ['comparison', '3_filter@10'],
+    ];
+    for (const [mode, group] of filterOrder) {
+      const title = mode[0].toUpperCase() + mode.slice(1);
+      const show = `tabManager.filter.${mode}`;
+      const clear = `tabManager.filter.clear${title}`;
+      assert.strictEqual(titleItems.find((item) => item.command === show)?.group, group);
+      assert.strictEqual(titleItems.find((item) => item.command === clear)?.group, group);
+    }
+
+    assert.deepStrictEqual(
+      packageJson.contributes.viewsWelcome.map((item: { view: string; contents: string; when?: string }) => [
+        item.view,
+        item.contents,
+        item.when,
+      ]),
+      [
+        ['tabManagerView', 'No tabs are open.', '!tabManager.hasActiveFilter'],
+        [
+          'tabManagerView',
+          'No open tabs match the active filter.\n[Clear Filter](command:tabManager.filter.clear)',
+          'tabManager.hasActiveFilter',
+        ],
+        [
+          'tabManagerExplorer',
+          'Open a folder or workspace to browse files.\n[Open Folder](command:vscode.openFolder)',
+          'workbenchState == empty',
+        ],
+        [
+          'tabManagerExplorer',
+          'No files match the active filter.\n[Clear Filter](command:tabManager.filter.clear)',
+          'workbenchState != empty && tabManager.hasActiveFilter',
+        ],
+        [
+          'tabManagerExplorer',
+          'No files or folders are in this workspace.',
+          'workbenchState != empty && !tabManager.hasActiveFilter',
+        ],
+        [
+          'tabManagerProjects',
+          'No saved projects.\n[Add Project Folder](command:tabManager.projects.addFolder)',
+          'workbenchState == empty',
+        ],
+        [
+          'tabManagerProjects',
+          'No saved projects.\n[Add Current Workspace](command:tabManager.projects.addCurrentWorkspace)\nOr [add another folder](command:tabManager.projects.addFolder).',
+          'workbenchState != empty',
+        ],
+      ],
+    );
   });
 
   test('executes state-specific clear, hide, and stop aliases safely', async () => {
@@ -265,6 +307,116 @@ suite('Tab Manager E2E', () => {
     assert.strictEqual(api.store.getSortState().readOnly, false);
   });
 
+  test('describes the active layout, filter, and sort state in each view', async () => {
+    const workspaceName = vscode.workspace.name;
+    try {
+      await vscode.commands.executeCommand('tabManager.layout.byColumn');
+      await waitFor(
+        () => api.tabView.description === 'By Column' || false,
+        'default Open Tabs description',
+      );
+      assert.strictEqual(api.explorerView.description, workspaceName);
+
+      await vscode.commands.executeCommand('tabManager.layout.merged');
+      await waitFor(
+        () => api.tabView.description === 'All Columns' || false,
+        'merged Open Tabs description',
+      );
+
+      await vscode.commands.executeCommand('tabManager.filter.modified');
+      await waitFor(
+        () => api.tabView.description === 'All Columns · Filter: Modified' || false,
+        'modified Open Tabs description',
+      );
+      assert.strictEqual(
+        api.explorerView.description,
+        `${workspaceName} · Filter: Modified`,
+      );
+
+      await vscode.commands.executeCommand('tabManager.sort.nameAsc');
+      await vscode.commands.executeCommand('tabManager.sort.toggleType');
+      await vscode.commands.executeCommand('tabManager.sort.toggleReadOnly');
+      await waitFor(
+        () =>
+          api.tabView.description ===
+            'All Columns · Filter: Modified · Sort: Name A–Z, Type, Read-only first' ||
+          false,
+        'sorted Open Tabs description',
+      );
+      assert.strictEqual(
+        api.explorerView.description,
+        `${workspaceName} · Filter: Modified · Sort: Name A–Z, Type`,
+      );
+
+      await vscode.commands.executeCommand('tabManager.sort.nameDesc');
+      await waitFor(
+        () => api.tabView.description?.includes('Sort: Name Z–A, Type, Read-only first') || false,
+        'descending sort description',
+      );
+
+      await vscode.commands.executeCommand('tabManager.filter.tabsOnly');
+      await waitFor(
+        () => api.tabView.description?.includes('Filter: Open Tabs') || false,
+        'Open Tabs filter label',
+      );
+    } finally {
+      await vscode.commands.executeCommand('tabManager.filter.clear');
+      await vscode.commands.executeCommand('tabManager.sort.nameNone');
+      await vscode.commands.executeCommand('tabManager.sort.stopType');
+      await vscode.commands.executeCommand('tabManager.sort.stopReadOnly');
+      await vscode.commands.executeCommand('tabManager.layout.byColumn');
+    }
+  });
+
+  test('renders recoverable Explorer read errors as non-interactive tree items', async () => {
+    const folder = vscode.Uri.file(path.join(workspaceRoot, 'blocked-folder'));
+    const node = new ExplorerErrorNode(folder, 'Permission denied');
+    assert.strictEqual(label(node), 'Unable to read folder');
+    assert.strictEqual(description(node), 'blocked-folder');
+    assert.strictEqual(node.id, `error:${folder.toString()}`);
+    assert.strictEqual(node.contextValue, 'explorerError');
+    assert.strictEqual((node.iconPath as vscode.ThemeIcon).id, 'error');
+    assert.strictEqual(node.command, undefined);
+    assert.strictEqual(node.resourceUri, undefined);
+    assert.strictEqual(node.tooltip, `${folder.fsPath}\nPermission denied`);
+    assert.deepStrictEqual(node.accessibilityInformation, {
+      label: 'Unable to read folder blocked-folder. Permission denied',
+      role: 'treeitem',
+    });
+
+    const transfer = new vscode.DataTransfer();
+    api.explorerProvider.handleDrag([node], transfer);
+    assert.strictEqual(transfer.get('text/uri-list'), undefined);
+    await api.explorerProvider.handleDrop(node, transfer);
+  });
+
+  test('shows view-scoped progress while refreshing Explorer files', async () => {
+    let progressOptions: vscode.ProgressOptions | undefined;
+    await withWindowStub(
+      'withProgress',
+      async (
+        options: vscode.ProgressOptions,
+        task: (
+          progress: vscode.Progress<{ message?: string }>,
+          token: vscode.CancellationToken,
+        ) => Thenable<unknown>,
+      ) => {
+        progressOptions = options;
+        const cancellation = new vscode.CancellationTokenSource();
+        try {
+          return await task({ report: () => undefined }, cancellation.token);
+        } finally {
+          cancellation.dispose();
+        }
+      },
+      () => vscode.commands.executeCommand('tabManager.explorer.refresh'),
+    );
+    assert.deepStrictEqual(progressOptions, {
+      location: { viewId: 'tabManagerExplorer' },
+      title: 'Refreshing files…',
+    });
+  });
+
   test('does not fail node-scoped commands when invoked without tree context', async () => {
     await expectNoCommandFailure('openTab without a tree node', () =>
       vscode.commands.executeCommand('tabManager.openTab'),
@@ -285,7 +437,13 @@ suite('Tab Manager E2E', () => {
 
     await vscode.commands.executeCommand('tabManager.layout.byColumn');
     assert.strictEqual(api.store.getTabLayoutMode(), 'byColumn');
-    assert.deepStrictEqual(new Set(labels(await tabRoots(api))), new Set(['Column 1', 'Column 2']));
+    const columns = await tabRoots(api);
+    assert.deepStrictEqual(new Set(labels(columns)), new Set(['Column 1', 'Column 2']));
+    assert.strictEqual(description(columns.find((node) => label(node) === 'Column 1')), '1 tab');
+    assert.strictEqual(
+      description(columns.find((node) => label(node) === 'Column 2')),
+      'active · 1 tab',
+    );
 
     await vscode.commands.executeCommand('tabManager.layout.merged');
     assert.strictEqual(api.store.getTabLayoutMode(), 'merged');
@@ -314,6 +472,7 @@ suite('Tab Manager E2E', () => {
     let roots = await tabRoots(api);
     const ungrouped = roots.find((node) => label(node) === 'Ungrouped');
     assert.ok(ungrouped, 'Expected Ungrouped header after creating a group.');
+    assert.strictEqual(description(ungrouped), '2 tabs');
     const alphaNode = (await tabChildren(api, ungrouped)).find((node) => label(node) === 'alpha.ts');
     assert.ok(alphaNode, 'Expected alpha.ts under Ungrouped.');
 
@@ -326,6 +485,7 @@ suite('Tab Manager E2E', () => {
     roots = await tabRoots(api);
     let groupNode = roots.find((node) => label(node) === 'Work');
     assert.ok(groupNode, 'Expected Work group node.');
+    assert.strictEqual(description(groupNode), '1 tab');
     let groupedAlpha = (await tabChildren(api, groupNode)).find((node) => label(node) === 'alpha.ts');
     assert.ok(groupedAlpha, 'Expected alpha.ts inside Work group.');
 
@@ -347,9 +507,12 @@ suite('Tab Manager E2E', () => {
     await openFile(zeta, vscode.ViewColumn.Beside);
     await waitFor(() => activeTabUri()?.toString() === zeta.toString(), 'zeta.txt to become active');
     const openAlphaNode = (await tabRoots(api)).find((node) => label(node) === 'alpha.ts');
-    assert.strictEqual((openAlphaNode as vscode.TreeItem).tooltip, `${alpha.fsPath}\nOpen Tab`);
+    assert.strictEqual(
+      (openAlphaNode as vscode.TreeItem).tooltip,
+      `${alpha.fsPath}\nStatus: active, Column 1\nOpen Tab`,
+    );
     assert.deepStrictEqual((openAlphaNode as vscode.TreeItem).accessibilityInformation, {
-      label: 'alpha.ts, Open Tab',
+      label: `alpha.ts, ${alpha.fsPath}, Column 1, active tab, Open Tab`,
       role: 'treeitem',
     });
     await vscode.commands.executeCommand('tabManager.openTab', openAlphaNode);
@@ -743,6 +906,13 @@ suite('Tab Manager E2E', () => {
       description(await waitForExplorerNode(api, 'metadata.txt')),
       '8 B · 2 lines',
     );
+    assert.deepStrictEqual(
+      (await waitForExplorerNode(api, 'metadata.txt') as vscode.TreeItem).accessibilityInformation,
+      {
+        label: `metadata.txt, ${target.fsPath}, 8 B, 2 lines, Open File`,
+        role: 'treeitem',
+      },
+    );
 
     await sleep(150);
     let treeChanges = 0;
@@ -982,7 +1152,7 @@ suite('Tab Manager E2E', () => {
     const alphaNode = (await explorerRoots(api)).find((node) => label(node) === 'alpha.ts');
     assert.strictEqual((alphaNode as vscode.TreeItem).tooltip, `${alpha.fsPath}\nOpen File`);
     assert.deepStrictEqual((alphaNode as vscode.TreeItem).accessibilityInformation, {
-      label: 'alpha.ts, Open File',
+      label: `alpha.ts, ${alpha.fsPath}, Open File`,
       role: 'treeitem',
     });
     assert.strictEqual((alphaNode as vscode.TreeItem).command?.title, 'Open File');
@@ -991,8 +1161,9 @@ suite('Tab Manager E2E', () => {
       projectNode.tooltip,
       `${path.basename(workspaceRoot)}\n${workspaceRoot}\nOpen Project in New Window`,
     );
+    assert.strictEqual(projectNode.description, path.basename(path.dirname(workspaceRoot)));
     assert.deepStrictEqual(projectNode.accessibilityInformation, {
-      label: `${path.basename(workspaceRoot)}, Open Project in New Window`,
+      label: `${path.basename(workspaceRoot)}, ${workspaceRoot}, Open Project in New Window`,
       role: 'treeitem',
     });
     await vscode.commands.executeCommand('tabManager.explorer.open', alpha);
@@ -1706,6 +1877,9 @@ class FakeInputBox {
   private readonly hideEmitter = new vscode.EventEmitter<void>();
   private readonly buttonEmitter = new vscode.EventEmitter<vscode.QuickInputButton>();
   private hidden = false;
+  get isHidden(): boolean {
+    return this.hidden;
+  }
   readonly onDidAccept = this.acceptEmitter.event;
   readonly onDidChangeValue = this.changeEmitter.event;
   readonly onDidHide = this.hideEmitter.event;
@@ -1733,28 +1907,6 @@ class FakeInputBox {
     this.hideEmitter.dispose();
     this.buttonEmitter.dispose();
   }
-}
-
-function rendererTooltipContext(): vscode.ExtensionContext {
-  const values = new Map<string, unknown>();
-  const globalState = {
-    get<T>(key: string, defaultValue?: T): T | undefined {
-      return values.has(key) ? values.get(key) as T : defaultValue;
-    },
-    update(key: string, value: unknown): Thenable<void> {
-      if (value === undefined) values.delete(key);
-      else values.set(key, value);
-      return Promise.resolve();
-    },
-    keys(): readonly string[] {
-      return [...values.keys()];
-    },
-    setKeysForSync(_keys: readonly string[]): void {},
-  };
-  return {
-    extensionMode: vscode.ExtensionMode.Production,
-    globalState,
-  } as unknown as vscode.ExtensionContext;
 }
 
 function failingStorageContext(): vscode.ExtensionContext {

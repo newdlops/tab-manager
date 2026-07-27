@@ -2,6 +2,14 @@
 
 All notable changes are documented here.
 
+## [Unreleased]
+
+### UI and usability
+- Simplified Open Tabs and Extended Explorer header actions.
+- Clarified view, filter, sort, empty, loading, and read-error states.
+- Improved tab and project row scanning without removing full-path tooltips.
+- Improved keyboard and screen-reader state descriptions and inline input error recovery.
+
 ## [0.1.6605]
 
 ### Extended Explorer

@@ -12,7 +12,7 @@ export class ProjectNode extends vscode.TreeItem {
   constructor(public readonly project: SavedProject) {
     super(projectLabel(project.uri), vscode.TreeItemCollapsibleState.None);
     this.resourceUri = project.uri;
-    this.description = projectDescription(project.uri);
+    this.description = projectCompactLocation(project.uri);
     this.tooltip = projectTooltip(project.uri);
     this.iconPath = isWorkspaceFile(project.uri)
       ? new vscode.ThemeIcon('workspace-trusted')
@@ -20,7 +20,7 @@ export class ProjectNode extends vscode.TreeItem {
     this.contextValue = 'project';
     this.id = `project:${project.uri.toString()}`;
     this.accessibilityInformation = {
-      label: `${projectLabel(project.uri)}, Open Project in New Window`,
+      label: `${projectLabel(project.uri)}, ${projectFullLocation(project.uri)}, Open Project in New Window`,
       role: 'treeitem',
     };
     this.command = {
@@ -194,7 +194,9 @@ async function addExistingProjects(
     if (await isProjectUri(uri)) {
       valid.push(uri);
     } else {
-      vscode.window.showWarningMessage(`"${projectDescription(uri)}" is not a folder or VS Code workspace file.`);
+      vscode.window.showWarningMessage(
+        `"${projectFullLocation(uri)}" is not a folder or VS Code workspace file.`,
+      );
     }
   }
   if (valid.length === 0) return;
@@ -242,12 +244,18 @@ function projectLabel(uri: vscode.Uri): string {
   return basename || uri.fsPath || uri.toString();
 }
 
-function projectDescription(uri: vscode.Uri): string {
+function projectFullLocation(uri: vscode.Uri): string {
   return uri.scheme === 'file' ? uri.fsPath : uri.toString();
 }
 
+function projectCompactLocation(uri: vscode.Uri): string {
+  if (uri.scheme !== 'file') return uri.authority || uri.scheme;
+  const parent = path.dirname(uri.fsPath);
+  return path.basename(parent) || parent;
+}
+
 function projectTooltip(uri: vscode.Uri): string {
-  return `${projectLabel(uri)}\n${projectDescription(uri)}\nOpen Project in New Window`;
+  return `${projectLabel(uri)}\n${projectFullLocation(uri)}\nOpen Project in New Window`;
 }
 
 function isWorkspaceFile(uri: vscode.Uri): boolean {

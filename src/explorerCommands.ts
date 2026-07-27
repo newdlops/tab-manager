@@ -124,16 +124,24 @@ export function registerExplorerCommands(
     ),
 
     vscode.commands.registerCommand('tabManager.explorer.refresh', async () => {
-      try {
-        await Promise.all([
-          filterSource.refresh(),
-          pullRequestComments?.refresh({ createSession: false }),
-        ]);
-      } catch (error) {
-        vscode.window.showErrorMessage(`Failed to refresh Explorer: ${formatOpenError(error)}`);
-      } finally {
-        provider.refresh();
-      }
+      await vscode.window.withProgress(
+        {
+          location: { viewId: 'tabManagerExplorer' },
+          title: 'Refreshing files…',
+        },
+        async () => {
+          try {
+            await Promise.all([
+              filterSource.refresh(),
+              pullRequestComments?.refresh({ createSession: false }),
+            ]);
+          } catch (error) {
+            vscode.window.showErrorMessage(`Failed to refresh Explorer: ${formatOpenError(error)}`);
+          } finally {
+            provider.refresh();
+          }
+        },
+      );
     }),
 
     vscode.commands.registerCommand('tabManager.explorer.expandAll', () =>
@@ -204,7 +212,7 @@ export function registerExplorerCommands(
         try {
           await vscode.workspace.fs.delete(uri, { recursive: true, useTrash: true });
         } catch (e) {
-          vscode.window.showErrorMessage(`Failed to delete ${baseName(uri)}: ${String(e)}`);
+          vscode.window.showErrorMessage(`Failed to delete ${baseName(uri)}: ${formatOpenError(e)}`);
         }
       }
     }),
@@ -365,7 +373,9 @@ export function registerExplorerCommands(
             await vscode.workspace.fs.copy(src, destUri, { overwrite: true });
           }
         } catch (e) {
-          vscode.window.showErrorMessage(`Failed to ${move ? 'move' : 'copy'} ${name}: ${String(e)}`);
+          vscode.window.showErrorMessage(
+            `Failed to ${move ? 'move' : 'copy'} ${name}: ${formatOpenError(e)}`,
+          );
         }
       }
 
@@ -662,6 +672,8 @@ async function startInlineCreate(
   input.ignoreFocusOut = true;
 
   const disposables: vscode.Disposable[] = [];
+  let submitting = false;
+  let hidden = false;
 
   disposables.push(
     input.onDidChangeValue((value) => {
@@ -670,18 +682,28 @@ async function startInlineCreate(
       input.validationMessage = msg;
     }),
     input.onDidAccept(async () => {
+      if (submitting) return;
       const name = input.value.trim();
       if (!name) {
         input.hide();
         return;
       }
-      if (validateName(name)) return;
+      const validation = validateName(name);
+      if (validation) {
+        input.validationMessage = validation;
+        return;
+      }
       const target = vscode.Uri.joinPath(dir, name);
       if (await exists(target)) {
         input.validationMessage = `"${name}" already exists.`;
         return;
       }
-      input.hide();
+
+      submitting = true;
+      input.busy = true;
+      input.enabled = false;
+      input.validationMessage = undefined;
+      let succeeded = false;
       try {
         if (kind === 'file') {
           await vscode.workspace.fs.writeFile(target, new Uint8Array());
@@ -689,11 +711,22 @@ async function startInlineCreate(
         } else {
           await vscode.workspace.fs.createDirectory(target);
         }
-      } catch (e) {
-        vscode.window.showErrorMessage(`Failed to create ${kind}: ${String(e)}`);
+        succeeded = true;
+        input.hide();
+      } catch (error) {
+        if (!hidden) {
+          input.validationMessage = `Failed to create ${kind}: ${formatOpenError(error)}`;
+        }
+      } finally {
+        if (!succeeded && !hidden) {
+          submitting = false;
+          input.busy = false;
+          input.enabled = true;
+        }
       }
     }),
     input.onDidHide(() => {
+      hidden = true;
       provider.clearPending();
       for (const d of disposables) d.dispose();
       input.dispose();
