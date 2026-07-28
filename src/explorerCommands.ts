@@ -26,6 +26,8 @@ interface ClipboardState {
   uris: vscode.Uri[];
   /** Whether these URIs were successfully mirrored onto the native OS clipboard. */
   mirrored: boolean;
+  /** The native file URI representation read immediately after a copy mirror. */
+  nativeMirrorUris?: vscode.Uri[];
 }
 
 interface PasteSources {
@@ -329,59 +331,69 @@ export function registerExplorerCommands(
     }),
 
     vscode.commands.registerCommand('tabManager.explorer.copy', async (node?: AnyItem, items?: AnyItem[]) => {
-      const uris = selectedUris(node, items);
+      const uris = normalizeCopySources(selectedUris(node, items));
       if (uris.length === 0) return;
       const mirrored = await writeClipboardFileUris(uris);
-      clipboard = { mode: 'copy', uris, mirrored };
+      const nativeMirrorUris = mirrored ? await readClipboardFileUris() : [];
+      clipboard = {
+        mode: 'copy',
+        uris,
+        mirrored,
+        nativeMirrorUris:
+          nativeMirrorUris.length > 0 && isUriSubset(nativeMirrorUris, uris)
+            ? nativeMirrorUris
+            : undefined,
+      };
       updateClipboardContext();
     }),
 
     vscode.commands.registerCommand('tabManager.explorer.paste', async (node?: AnyNode) => {
       const resolved = await resolvePasteSources();
       if (!resolved || resolved.sources.length === 0) return;
-      const target = await resolveContainer(node ?? selectedNodes()[0]);
-      if (!target) return;
       const { sources, move, fromInternal } = resolved;
+      const copySources = move ? sources : normalizeCopySources(sources);
+      const target = move
+        ? await resolveContainer(node ?? selectedNodes()[0])
+        : await resolveCopyContainer(node, selectedNodes()[0], copySources);
+      if (!target) return;
+
+      if (!move) {
+        await copyPaste(copySources, target);
+        if (!fromInternal) {
+          clipboard = undefined;
+          updateClipboardContext();
+        }
+        return;
+      }
 
       for (const src of sources) {
         const name = baseName(src);
         if (isSameOrAncestor(src, target)) {
-          vscode.window.showWarningMessage(`Cannot ${move ? 'move' : 'copy'} "${name}" into itself.`);
+          vscode.window.showWarningMessage(`Cannot move "${name}" into itself.`);
           continue;
         }
         let destUri = vscode.Uri.joinPath(target, name);
         if (src.toString() === destUri.toString()) {
-          if (move) continue;
-          destUri = await uniqueDestination(target, name);
+          continue;
         } else if (await exists(destUri)) {
-          if (move) {
-            const pick = await vscode.window.showWarningMessage(
-              `"${name}" already exists. Overwrite?`,
-              { modal: true },
-              'Overwrite',
-              'Skip',
-            );
-            if (pick !== 'Overwrite') continue;
-          } else {
-            destUri = await uniqueDestination(target, name);
-          }
+          const pick = await vscode.window.showWarningMessage(
+            `"${name}" already exists. Overwrite?`,
+            { modal: true },
+            'Overwrite',
+            'Skip',
+          );
+          if (pick !== 'Overwrite') continue;
         }
         try {
-          if (move) {
-            await vscode.workspace.fs.rename(src, destUri, { overwrite: true });
-          } else {
-            await vscode.workspace.fs.copy(src, destUri, { overwrite: true });
-          }
+          await vscode.workspace.fs.rename(src, destUri, { overwrite: true });
         } catch (e) {
-          vscode.window.showErrorMessage(
-            `Failed to ${move ? 'move' : 'copy'} ${name}: ${formatOpenError(e)}`,
-          );
+          vscode.window.showErrorMessage(`Failed to move ${name}: ${formatOpenError(e)}`);
         }
       }
 
       // A move consumes the clipboard; an external paste supersedes any stale
       // internal clipboard so the tree stops advertising it.
-      if ((move && fromInternal) || !fromInternal) {
+      if (fromInternal) {
         clipboard = undefined;
         updateClipboardContext();
       }
@@ -771,6 +783,18 @@ function isSameOrAncestor(src: vscode.Uri, candidate: vscode.Uri): boolean {
   return s === c || c.startsWith(s + '/');
 }
 
+function normalizeCopySources(uris: readonly vscode.Uri[]): vscode.Uri[] {
+  const unique = uris.filter(
+    (uri, index) => uris.findIndex((candidate) => candidate.toString() === uri.toString()) === index,
+  );
+  return unique.filter(
+    (candidate) =>
+      !unique.some(
+        (other) => other.toString() !== candidate.toString() && isSameOrAncestor(other, candidate),
+      ),
+  );
+}
+
 /**
  * Decides what a paste should act on, reconciling the extension's internal
  * clipboard with the native OS clipboard (files copied in Finder / Explorer /
@@ -778,7 +802,8 @@ function isSameOrAncestor(src: vscode.Uri, candidate: vscode.Uri): boolean {
  *
  * The internal clipboard wins while it is set — preserving cut/copy semantics —
  * unless the OS clipboard has clearly changed to a different set of files since
- * the internal copy, in which case that newer external selection takes over.
+ * the internal copy (including its captured native mirror representation), in
+ * which case that newer external selection takes over.
  * When there is no internal clipboard, any files on the OS clipboard are pasted
  * as a copy.
  */
@@ -786,8 +811,13 @@ async function resolvePasteSources(): Promise<PasteSources | undefined> {
   const osFiles = await readClipboardFileUris();
 
   if (clipboard && clipboard.uris.length > 0) {
+    const matchesInternal =
+      sameUriSet(osFiles, clipboard.uris) ||
+      (clipboard.mode === 'copy' &&
+        clipboard.nativeMirrorUris !== undefined &&
+        sameUriSet(osFiles, clipboard.nativeMirrorUris));
     const externalIsNewer =
-      clipboard.mirrored && osFiles.length > 0 && !sameUriSet(osFiles, clipboard.uris);
+      clipboard.mirrored && osFiles.length > 0 && !matchesInternal;
     if (externalIsNewer) {
       return { sources: osFiles, move: false, fromInternal: false };
     }
@@ -806,6 +836,11 @@ function sameUriSet(a: readonly vscode.Uri[], b: readonly vscode.Uri[]): boolean
   return a.every((u) => setB.has(u.toString()));
 }
 
+function isUriSubset(candidate: readonly vscode.Uri[], sources: readonly vscode.Uri[]): boolean {
+  const sourceSet = new Set(sources.map((uri) => uri.toString()));
+  return candidate.every((uri) => sourceSet.has(uri.toString()));
+}
+
 async function exists(uri: vscode.Uri): Promise<boolean> {
   try {
     await vscode.workspace.fs.stat(uri);
@@ -815,15 +850,104 @@ async function exists(uri: vscode.Uri): Promise<boolean> {
   }
 }
 
-async function uniqueDestination(parent: vscode.Uri, name: string): Promise<vscode.Uri> {
-  const dot = name.lastIndexOf('.');
-  const stem = dot > 0 ? name.slice(0, dot) : name;
-  const ext = dot > 0 ? name.slice(dot) : '';
-  for (let i = 1; i < 1000; i++) {
-    const candidate = vscode.Uri.joinPath(parent, `${stem} copy${i === 1 ? '' : ' ' + i}${ext}`);
+async function copyPaste(sources: readonly vscode.Uri[], target: vscode.Uri): Promise<void> {
+  const blocked: string[] = [];
+  const failures: Array<{ name: string; reason: string }> = [];
+  await vscode.window.withProgress(
+    {
+      location: { viewId: 'tabManagerExplorer' },
+      title: `Copying ${sources.length === 1 ? '1 item' : `${sources.length} items`}…`,
+    },
+    async (progress) => {
+      const increment = 100 / sources.length;
+      for (const source of sources) {
+        const name = baseName(source);
+        progress.report({ message: name, increment });
+        try {
+          const stat = await vscode.workspace.fs.stat(source);
+          const isDirectory = (stat.type & vscode.FileType.Directory) !== 0;
+          if (isDirectory && isSameOrAncestor(source, target)) {
+            blocked.push(name);
+            continue;
+          }
+          const destination = await uniqueCopyDestination(target, name, isDirectory);
+          await vscode.workspace.fs.copy(source, destination, { overwrite: false });
+        } catch (error) {
+          failures.push({ name, reason: formatOpenError(error) });
+        }
+      }
+    },
+  );
+  if (blocked.length === 1) {
+    vscode.window.showWarningMessage(`Cannot copy "${blocked[0]}" into itself.`);
+  } else if (blocked.length > 1) {
+    vscode.window.showWarningMessage(formatCopyIssue('Cannot copy', blocked));
+  }
+  if (failures.length > 0) {
+    vscode.window.showErrorMessage(formatCopyFailures(failures));
+  }
+}
+
+async function uniqueCopyDestination(
+  parent: vscode.Uri,
+  name: string,
+  isDirectory: boolean,
+): Promise<vscode.Uri> {
+  const initial = vscode.Uri.joinPath(parent, name);
+  if (!(await exists(initial))) return initial;
+  for (let attempt = 1; attempt <= 10_000; attempt++) {
+    const candidate = vscode.Uri.joinPath(parent, copyName(name, isDirectory, attempt));
     if (!(await exists(candidate))) return candidate;
   }
-  return vscode.Uri.joinPath(parent, `${stem}-${Date.now()}${ext}`);
+  throw new Error(`Unable to find an available copy name for "${name}".`);
+}
+
+function copyName(name: string, isDirectory: boolean, attempt: number): string {
+  const dot = isDirectory ? -1 : name.lastIndexOf('.');
+  const stem = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : '';
+  const match = /^(.*) copy(?: ([1-9]\d*))?$/.exec(stem);
+  if (!match) return `${stem} copy${attempt === 1 ? '' : ` ${attempt}`}${ext}`;
+
+  const suffix = match[2] === undefined ? 1 : Number(match[2]);
+  if (suffix >= Number.MAX_SAFE_INTEGER) {
+    return `${stem} copy${attempt === 1 ? '' : ` ${attempt}`}${ext}`;
+  }
+  return `${match[1]} copy ${suffix + attempt}${ext}`;
+}
+
+function formatCopyIssue(prefix: string, names: readonly string[]): string {
+  const shown = names.slice(0, 3).map((name) => `"${name}"`).join(', ');
+  const more = names.length > 3 ? `; and ${names.length - 3} more` : '';
+  return `${prefix} ${names.length} items into themselves: ${shown}${more}.`;
+}
+
+function formatCopyFailures(failures: ReadonlyArray<{ name: string; reason: string }>): string {
+  if (failures.length === 1) {
+    return `Failed to copy "${failures[0].name}": ${failures[0].reason}`;
+  }
+  const shown = failures
+    .slice(0, 3)
+    .map(({ name, reason }) => `"${name}": ${reason}`)
+    .join('; ');
+  const more = failures.length > 3 ? `; and ${failures.length - 3} more` : '';
+  return `Failed to copy ${failures.length} items: ${shown}${more}.`;
+}
+
+async function resolveCopyContainer(
+  trigger: AnyNode | undefined,
+  selected: AnyNode | undefined,
+  sources: readonly vscode.Uri[],
+): Promise<vscode.Uri | undefined> {
+  if (trigger) return resolveContainer(trigger);
+  if (!selected) return resolveContainer(undefined);
+  if (!(selected instanceof WorkspaceFolderNode)) {
+    const selectedUri = uriOf(selected);
+    if (selectedUri && sources.some((source) => source.toString() === selectedUri.toString())) {
+      return parentUri(selectedUri);
+    }
+  }
+  return resolveContainer(selected);
 }
 
 async function resolveContainer(node?: AnyNode): Promise<vscode.Uri | undefined> {

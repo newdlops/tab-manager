@@ -822,6 +822,127 @@ suite('Tab Manager E2E', () => {
     assert.ok((await explorerChildren(api, criticalRootNode)).some((node) => label(node) === 'parent'));
   });
 
+  test('copies normalized mixed Explorer selections with progress and Finder-style names', async function () {
+    this.timeout(60_000);
+    const base = uri('copy-batch');
+    const target = uri('copy-batch/target');
+    const report = uri('copy-batch/report.txt');
+    const dotfile = uri('copy-batch/.env');
+    const folder = uri('copy-batch/folder.with.dot');
+    const nested = uri('copy-batch/folder.with.dot/nested.txt');
+    const sentinel = uri('copy-batch/sentinel.txt');
+    fs.mkdirSync(target.fsPath, { recursive: true });
+    fs.mkdirSync(folder.fsPath, { recursive: true });
+    fs.writeFileSync(report.fsPath, 'report source\n');
+    fs.writeFileSync(dotfile.fsPath, 'environment source\n');
+    fs.writeFileSync(nested.fsPath, 'nested source\n');
+    fs.writeFileSync(sentinel.fsPath, 'source sentinel\n');
+    fs.writeFileSync(path.join(target.fsPath, 'sentinel.txt'), 'destination sentinel\n');
+    api.explorerProvider.refresh();
+    const targetNode = await waitForExplorerNode(api, 'target', base);
+
+    await vscode.commands.executeCommand('tabManager.explorer.copy', undefined, [
+      itemFor(report),
+      itemFor(folder),
+      itemFor(nested),
+      itemFor(dotfile),
+      itemFor(sentinel),
+      itemFor(report),
+    ]);
+
+    const reports: string[] = [];
+    let progressOptions: vscode.ProgressOptions | undefined;
+    await withWindowStub(
+      'withProgress',
+      async (
+        options: vscode.ProgressOptions,
+        task: (progress: vscode.Progress<{ message?: string }>) => Thenable<unknown>,
+      ) => {
+        progressOptions = options;
+        return task({ report: (value) => reports.push(value.message ?? '') });
+      },
+      () => vscode.commands.executeCommand('tabManager.explorer.paste', targetNode),
+    );
+    assert.deepStrictEqual(progressOptions, {
+      location: { viewId: 'tabManagerExplorer' },
+      title: 'Copying 4 items…',
+    });
+    assert.deepStrictEqual(reports, ['report.txt', 'folder.with.dot', '.env', 'sentinel.txt']);
+    assert.strictEqual(fs.readFileSync(path.join(target.fsPath, 'report.txt'), 'utf8'), 'report source\n');
+    assert.strictEqual(fs.readFileSync(path.join(target.fsPath, '.env'), 'utf8'), 'environment source\n');
+    assert.strictEqual(
+      fs.readFileSync(path.join(target.fsPath, 'folder.with.dot/nested.txt'), 'utf8'),
+      'nested source\n',
+    );
+    assert.ok(!fs.existsSync(path.join(target.fsPath, 'nested.txt')));
+    assert.strictEqual(fs.readFileSync(path.join(target.fsPath, 'sentinel.txt'), 'utf8'), 'destination sentinel\n');
+    assert.strictEqual(
+      fs.readFileSync(path.join(target.fsPath, 'sentinel copy.txt'), 'utf8'),
+      'source sentinel\n',
+    );
+
+    await vscode.commands.executeCommand('tabManager.explorer.paste', targetNode);
+    await vscode.commands.executeCommand('tabManager.explorer.paste', targetNode);
+    for (const copied of [
+      'report copy.txt',
+      'report copy 2.txt',
+      '.env copy',
+      '.env copy 2',
+      'folder.with.dot copy/nested.txt',
+      'folder.with.dot copy 2/nested.txt',
+    ]) {
+      assert.ok(fs.existsSync(path.join(target.fsPath, copied)), `Expected ${copied} to be copied.`);
+    }
+    assert.strictEqual(fs.readFileSync(report.fsPath, 'utf8'), 'report source\n');
+    assert.strictEqual(fs.readFileSync(nested.fsPath, 'utf8'), 'nested source\n');
+  });
+
+  test('pastes a selected copied folder beside itself and recovers a partial batch', async function () {
+    this.timeout(60_000);
+    const base = uri('copy-keyboard');
+    const folder = uri('copy-keyboard/source-folder');
+    const nested = uri('copy-keyboard/source-folder/nested.txt');
+    fs.mkdirSync(folder.fsPath, { recursive: true });
+    fs.writeFileSync(nested.fsPath, 'nested\n');
+    api.explorerProvider.refresh();
+    const folderNode = await waitForExplorerNode(api, 'source-folder', base);
+    await api.explorerView.reveal(folderNode, { select: true, focus: true });
+    await vscode.commands.executeCommand('tabManager.explorer.copy');
+    await vscode.commands.executeCommand('tabManager.explorer.paste');
+    await waitFor(
+      () => fs.existsSync(path.join(base.fsPath, 'source-folder copy/nested.txt')),
+      'selected folder to be copied beside itself',
+    );
+    assert.ok(!fs.existsSync(path.join(folder.fsPath, 'source-folder')));
+
+    const target = uri('copy-keyboard/recovery-target');
+    const valid = uri('copy-keyboard/recovery-valid.txt');
+    const missing = uri('copy-keyboard/recovery-missing.txt');
+    fs.mkdirSync(target.fsPath, { recursive: true });
+    fs.writeFileSync(valid.fsPath, 'valid\n');
+    api.explorerProvider.refresh();
+    const recoveryTargetNode = await waitForExplorerNode(api, 'recovery-target', base);
+    const errors: string[] = [];
+    await vscode.commands.executeCommand('tabManager.explorer.copy', undefined, [itemFor(valid), itemFor(missing)]);
+    await withWindowStub(
+      'showErrorMessage',
+      (message: string) => {
+        errors.push(message);
+        return Promise.resolve(undefined);
+      },
+      () => vscode.commands.executeCommand('tabManager.explorer.paste', recoveryTargetNode),
+    );
+    assert.strictEqual(errors.length, 1);
+    assert.ok(errors[0].includes('recovery-missing.txt'));
+    assert.strictEqual(fs.readFileSync(path.join(target.fsPath, 'recovery-valid.txt'), 'utf8'), 'valid\n');
+    assert.ok(!fs.existsSync(path.join(target.fsPath, 'recovery-missing.txt')));
+
+    fs.writeFileSync(missing.fsPath, 'recovered\n');
+    await vscode.commands.executeCommand('tabManager.explorer.paste', recoveryTargetNode);
+    assert.strictEqual(fs.readFileSync(path.join(target.fsPath, 'recovery-missing.txt'), 'utf8'), 'recovered\n');
+    assert.strictEqual(fs.readFileSync(path.join(target.fsPath, 'recovery-valid copy.txt'), 'utf8'), 'valid\n');
+  });
+
   test('recovers from persisted state after reload and ignores corrupted state', async function () {
     this.timeout(30_000);
     await withInputBox('Persisted Group', () =>
@@ -1392,13 +1513,21 @@ suite('Tab Manager E2E', () => {
     const base = uri('os-clip');
     fs.mkdirSync(base.fsPath, { recursive: true });
     const probe = uri('os-clip/probe.txt');
+    const probeFolder = uri('os-clip/probe-folder');
+    const probeNested = uri('os-clip/probe-folder/nested.txt');
+    fs.mkdirSync(probeFolder.fsPath, { recursive: true });
     fs.writeFileSync(probe.fsPath, 'probe\n');
+    fs.writeFileSync(probeNested.fsPath, 'probe nested\n');
 
     // The native OS clipboard is unavailable in some headless environments; the
     // feature degrades gracefully there, so skip rather than fail.
-    const wrote = await writeClipboardFileUris([probe]);
+    const wrote = await writeClipboardFileUris([probe, probeFolder]);
     const readBack = await readClipboardFileUris();
-    if (!wrote || !readBack.some((u) => path.basename(u.fsPath) === 'probe.txt')) {
+    if (
+      !wrote ||
+      !readBack.some((u) => path.basename(u.fsPath) === 'probe.txt') ||
+      !readBack.some((u) => path.basename(u.fsPath) === 'probe-folder')
+    ) {
       this.skip();
       return;
     }
@@ -1408,13 +1537,17 @@ suite('Tab Manager E2E', () => {
     const internal = uri('os-clip/internal.txt');
     fs.writeFileSync(internal.fsPath, 'internal\n');
     const external = uri('os-clip/external.txt');
+    const externalFolder = uri('os-clip/external-folder');
+    const externalNested = uri('os-clip/external-folder/nested.txt');
     fs.writeFileSync(external.fsPath, 'from another app\n');
+    fs.mkdirSync(externalFolder.fsPath, { recursive: true });
+    fs.writeFileSync(externalNested.fsPath, 'external nested\n');
     const targetDir = uri('os-clip/target');
     fs.mkdirSync(targetDir.fsPath, { recursive: true });
     api.explorerProvider.refresh();
 
     await vscode.commands.executeCommand('tabManager.explorer.copy', itemFor(internal));
-    await writeClipboardFileUris([external]);
+    await writeClipboardFileUris([external, externalFolder]);
 
     const targetNode = await waitForExplorerNode(api, 'target', base);
     await vscode.commands.executeCommand('tabManager.explorer.paste', targetNode);
@@ -1422,6 +1555,10 @@ suite('Tab Manager E2E', () => {
     const pasted = path.join(targetDir.fsPath, 'external.txt');
     await waitFor(() => fs.existsSync(pasted), 'external OS clipboard paste');
     assert.strictEqual(fs.readFileSync(pasted, 'utf8'), 'from another app\n');
+    assert.strictEqual(
+      fs.readFileSync(path.join(targetDir.fsPath, 'external-folder/nested.txt'), 'utf8'),
+      'external nested\n',
+    );
     assert.ok(
       !fs.existsSync(path.join(targetDir.fsPath, 'internal.txt')),
       'A newer external selection should supersede the internal clipboard.',
