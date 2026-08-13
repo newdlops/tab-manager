@@ -84,6 +84,10 @@ interface TestApi {
   };
   pullRequestCommentDecorations: {
     readonly onDidChangePullRequestData: vscode.Event<void>;
+    refresh(options?: {
+      createSession?: boolean;
+      showStatus?: boolean;
+    }): Promise<void>;
     getCommentedUris(): readonly vscode.Uri[];
     getPullRequestFileUris(): readonly vscode.Uri[];
     getPullRequestFileEntries(): readonly { uri: vscode.Uri; status?: string }[];
@@ -305,6 +309,70 @@ suite('Tab Manager E2E', () => {
     await vscode.commands.executeCommand('tabManager.sort.toggleReadOnly');
     await vscode.commands.executeCommand('tabManager.sort.stopReadOnly');
     assert.strictEqual(api.store.getSortState().readOnly, false);
+  });
+
+  test('loads authenticated PR data when a pull request filter is enabled', async () => {
+    const originalRefresh = api.pullRequestCommentDecorations.refresh;
+    const refreshOptions: Array<{
+      createSession?: boolean;
+      showStatus?: boolean;
+    }> = [];
+    let progressOptions: vscode.ProgressOptions | undefined;
+    api.pullRequestCommentDecorations.refresh = async (options = {}) => {
+      refreshOptions.push(options);
+    };
+
+    try {
+      for (const [mode, command] of [
+        ['prComments', 'tabManager.filter.prComments'],
+        ['prFiles', 'tabManager.filter.prFiles'],
+      ] as const) {
+        await vscode.commands.executeCommand('tabManager.filter.clear');
+        progressOptions = undefined;
+        await withWindowStub(
+          'withProgress',
+          async (
+            options: vscode.ProgressOptions,
+            task: (
+              progress: vscode.Progress<{ message?: string }>,
+              token: vscode.CancellationToken,
+            ) => Thenable<unknown>,
+          ) => {
+            progressOptions = options;
+            const cancellation = new vscode.CancellationTokenSource();
+            try {
+              return await task({ report: () => undefined }, cancellation.token);
+            } finally {
+              cancellation.dispose();
+            }
+          },
+          () => vscode.commands.executeCommand(command),
+        );
+
+        assert.strictEqual(api.store.getFilterMode(), mode);
+        const authenticatedRefreshes = refreshOptions.filter((options) => options.createSession);
+        assert.deepStrictEqual(authenticatedRefreshes.at(-1), {
+          createSession: true,
+          showStatus: true,
+        });
+        assert.deepStrictEqual(progressOptions, {
+          location: vscode.ProgressLocation.Window,
+          title: 'Loading pull request data…',
+        });
+
+        const authenticatedRefreshCount = authenticatedRefreshes.length;
+        await vscode.commands.executeCommand(command);
+        assert.strictEqual(api.store.getFilterMode(), 'none');
+        assert.strictEqual(
+          refreshOptions.filter((options) => options.createSession).length,
+          authenticatedRefreshCount,
+          'Clearing the filter must not reload PR data.',
+        );
+      }
+    } finally {
+      api.pullRequestCommentDecorations.refresh = originalRefresh;
+      await vscode.commands.executeCommand('tabManager.filter.clear');
+    }
   });
 
   test('describes the active layout, filter, and sort state in each view', async () => {

@@ -242,6 +242,25 @@ export function activate(context: vscode.ExtensionContext) {
       hasActiveComparison,
     );
   };
+  const togglePullRequestFilter = async (mode: 'prComments' | 'prFiles') => {
+    if (store.getFilterMode() === mode) {
+      await store.setFilterMode('none');
+      return;
+    }
+
+    await store.setFilterMode(mode);
+    await vscode.window.withProgress(
+      {
+        location: vscode.ProgressLocation.Window,
+        title: 'Loading pull request data…',
+      },
+      () =>
+        pullRequestCommentDecorations.refresh({
+          createSession: true,
+          showStatus: true,
+        }),
+    );
+  };
   syncSortContext();
   syncFilterState();
   syncLayoutState();
@@ -433,10 +452,10 @@ export function activate(context: vscode.ExtensionContext) {
       store.toggleFilterMode('readOnly'),
     ),
     vscode.commands.registerCommand('tabManager.filter.prComments', () =>
-      store.toggleFilterMode('prComments'),
+      togglePullRequestFilter('prComments'),
     ),
     vscode.commands.registerCommand('tabManager.filter.prFiles', () =>
-      store.toggleFilterMode('prFiles'),
+      togglePullRequestFilter('prFiles'),
     ),
     vscode.commands.registerCommand('tabManager.filter.comparison', () =>
       store.toggleFilterMode('comparison'),

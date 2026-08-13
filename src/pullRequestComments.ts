@@ -196,7 +196,7 @@ export class PullRequestCommentDecorationProvider
     } catch (error) {
       if (options.showStatus) {
         void vscode.window.showErrorMessage(
-          `Failed to refresh PR comments: ${formatError(error)}`,
+          `Failed to refresh pull request data: ${formatError(error)}`,
         );
       }
     }
