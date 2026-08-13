@@ -1,7 +1,14 @@
-import * as https from 'https';
-import type { IncomingHttpHeaders } from 'http';
 import * as path from 'path';
 import * as vscode from 'vscode';
+import {
+  encodePathPart,
+  findPullRequestForBranch,
+  githubApiUrl,
+  githubJson,
+  type GithubRemote,
+  nextPageUrl,
+  type PullRequestSummary,
+} from './githubPullRequestApi';
 import { debounce } from './util';
 
 export interface PullRequestCommentRefreshOptions {
@@ -45,23 +52,11 @@ interface Remote {
   readonly pushUrl?: string;
 }
 
-interface GithubRemote {
-  readonly remoteName: string;
-  readonly owner: string;
-  readonly repo: string;
-}
-
 interface PullRequestLookupContext {
   readonly repository: Repository;
   readonly branchName: string;
   readonly baseRemotes: readonly GithubRemote[];
   readonly headRemotes: readonly GithubRemote[];
-}
-
-interface PullRequestSummary {
-  readonly owner: string;
-  readonly repo: string;
-  readonly number: number;
 }
 
 interface PullRequestFileDecoration {
@@ -71,10 +66,6 @@ interface PullRequestFileDecoration {
   readonly pullRequestNumber: number;
 }
 
-interface GithubPullRequestItem {
-  readonly number?: unknown;
-}
-
 interface GithubPullRequestComment {
   readonly path?: unknown;
 }
@@ -82,20 +73,6 @@ interface GithubPullRequestComment {
 interface GithubPullRequestFile {
   readonly filename?: unknown;
   readonly status?: unknown;
-}
-
-type GithubPullRequestLookupState = 'open' | 'closed';
-
-const PULL_REQUEST_LOOKUP_STATES: readonly GithubPullRequestLookupState[] = ['open', 'closed'];
-
-class GithubHttpError extends Error {
-  constructor(
-    readonly statusCode: number,
-    message: string,
-  ) {
-    super(message);
-    this.name = 'GithubHttpError';
-  }
 }
 
 export class PullRequestCommentDecorationProvider
@@ -330,31 +307,14 @@ export class PullRequestCommentDecorationProvider
     context: PullRequestLookupContext,
     accessToken: string | undefined,
   ): Promise<PullRequestSummary | undefined> {
-    for (const state of PULL_REQUEST_LOOKUP_STATES) {
-      for (const base of context.baseRemotes) {
-        for (const head of context.headRemotes) {
-          try {
-            const pullRequest = await readPullRequestForBranch(
-              base,
-              head.owner,
-              context.branchName,
-              state,
-              accessToken,
-            );
-            if (pullRequest) return pullRequest;
-          } catch (error) {
-            if (
-              error instanceof GithubHttpError &&
-              (error.statusCode === 404 || error.statusCode === 422)
-            ) {
-              continue;
-            }
-            throw error;
-          }
-        }
-      }
-    }
-    return undefined;
+    return findPullRequestForBranch(
+      {
+        branchName: context.branchName,
+        baseRemotes: context.baseRemotes,
+        headRemotes: context.headRemotes,
+      },
+      accessToken,
+    );
   }
 
   private applyDecorations(
@@ -400,33 +360,6 @@ async function getGithubAccessToken(createSession: boolean): Promise<string | un
   }
 }
 
-async function readPullRequestForBranch(
-  base: GithubRemote,
-  headOwner: string,
-  branchName: string,
-  state: GithubPullRequestLookupState,
-  accessToken: string | undefined,
-): Promise<PullRequestSummary | undefined> {
-  const url = githubApiUrl(
-    `/repos/${encodePathPart(base.owner)}/${encodePathPart(base.repo)}/pulls`,
-    {
-      state,
-      head: `${headOwner}:${branchName}`,
-      sort: 'created',
-      direction: 'desc',
-      per_page: '1',
-    },
-  );
-  const { value } = await githubJson<unknown[]>(url, accessToken);
-  const item = value.find(isGithubPullRequestItem);
-  if (!item || typeof item.number !== 'number') return undefined;
-  return {
-    owner: base.owner,
-    repo: base.repo,
-    number: item.number,
-  };
-}
-
 async function readPullRequestComments(
   pullRequest: PullRequestSummary,
   accessToken: string | undefined,
@@ -463,75 +396,6 @@ async function readPullRequestFiles(
   }
 
   return files;
-}
-
-function githubJson<T>(
-  url: string,
-  accessToken: string | undefined,
-): Promise<{ value: T; headers: IncomingHttpHeaders }> {
-  return new Promise((resolve, reject) => {
-    const headers: Record<string, string> = {
-      Accept: 'application/vnd.github+json',
-      'User-Agent': 'newdlops-tab-manager',
-      'X-GitHub-Api-Version': '2022-11-28',
-    };
-    if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
-
-    const req = https.request(url, { method: 'GET', headers }, (res) => {
-      const chunks: Buffer[] = [];
-      res.on('data', (chunk: Buffer | string) => {
-        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-      });
-      res.on('end', () => {
-        const body = Buffer.concat(chunks).toString('utf8');
-        const statusCode = res.statusCode ?? 0;
-        if (statusCode < 200 || statusCode >= 300) {
-          reject(new GithubHttpError(statusCode, githubErrorMessage(statusCode, body)));
-          return;
-        }
-        try {
-          resolve({
-            value: (body ? JSON.parse(body) : undefined) as T,
-            headers: res.headers,
-          });
-        } catch (error) {
-          reject(error);
-        }
-      });
-    });
-    req.setTimeout(15_000, () => req.destroy(new Error('GitHub request timed out.')));
-    req.on('error', reject);
-    req.end();
-  });
-}
-
-function githubApiUrl(pathname: string, params: Record<string, string>): string {
-  const url = new URL(`https://api.github.com${pathname}`);
-  for (const [key, value] of Object.entries(params)) url.searchParams.set(key, value);
-  return url.toString();
-}
-
-function nextPageUrl(headers: IncomingHttpHeaders): string | undefined {
-  const raw = headers.link;
-  const link = Array.isArray(raw) ? raw.join(',') : raw;
-  if (!link) return undefined;
-  for (const part of link.split(',')) {
-    const match = part.match(/<([^>]+)>;\s*rel="next"/);
-    if (match) return match[1];
-  }
-  return undefined;
-}
-
-function githubErrorMessage(statusCode: number, body: string): string {
-  try {
-    const parsed = JSON.parse(body) as { message?: unknown };
-    if (typeof parsed.message === 'string' && parsed.message.length > 0) {
-      return `GitHub API returned ${statusCode}: ${parsed.message}`;
-    }
-  } catch {
-    /* ignore malformed error payload */
-  }
-  return `GitHub API returned ${statusCode}`;
 }
 
 function githubRemotes(remotes: readonly Remote[]): GithubRemote[] {
@@ -632,14 +496,6 @@ function isSameOrInside(uri: vscode.Uri, root: vscode.Uri): boolean {
   return uriString === rootString || uriString.startsWith(`${rootString}/`);
 }
 
-function isGithubPullRequestItem(value: unknown): value is GithubPullRequestItem {
-  return (
-    !!value &&
-    typeof value === 'object' &&
-    typeof (value as GithubPullRequestItem).number === 'number'
-  );
-}
-
 function isGithubPullRequestComment(value: unknown): value is GithubPullRequestComment {
   return (
     !!value &&
@@ -654,10 +510,6 @@ function isGithubPullRequestFile(value: unknown): value is GithubPullRequestFile
     typeof value === 'object' &&
     typeof (value as GithubPullRequestFile).filename === 'string'
   );
-}
-
-function encodePathPart(value: string): string {
-  return encodeURIComponent(value);
 }
 
 const PULL_REQUEST_FILE_BADGE = 'PR';
