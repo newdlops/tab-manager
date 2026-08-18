@@ -1574,7 +1574,7 @@ suite('Tab Manager E2E', () => {
     assert.ok(!fs.existsSync(path.join(child.fsPath, 'parent')));
   });
 
-  test('pastes files placed on the OS clipboard by another application', async function () {
+  test('round-trips multiple files through the OS clipboard and another VS Code window', async function () {
     this.timeout(20_000);
     const { writeClipboardFileUris, readClipboardFileUris } = await import('../../osClipboard.js');
 
@@ -1599,9 +1599,13 @@ suite('Tab Manager E2E', () => {
       this.skip();
       return;
     }
+    if (process.platform === 'darwin') {
+      assert.deepStrictEqual(readMacVsCodeClipboardUris(), [probe, probeFolder].map((u) => u.toString()));
+    }
 
     // An internal copy is on the clipboard, but a newer external selection —
-    // simulating a copy from Finder / Explorer / another window — must win.
+    // simulating a copy from another VS Code window — must win even when its
+    // private resource list is the only representation on the pasteboard.
     const internal = uri('os-clip/internal.txt');
     fs.writeFileSync(internal.fsPath, 'internal\n');
     const external = uri('os-clip/external.txt');
@@ -1615,7 +1619,11 @@ suite('Tab Manager E2E', () => {
     api.explorerProvider.refresh();
 
     await vscode.commands.executeCommand('tabManager.explorer.copy', itemFor(internal));
-    await writeClipboardFileUris([external, externalFolder]);
+    const wroteExternal =
+      process.platform === 'darwin'
+        ? writeMacVsCodeClipboardUris([external, externalFolder])
+        : await writeClipboardFileUris([external, externalFolder]);
+    assert.strictEqual(wroteExternal, true);
 
     const targetNode = await waitForExplorerNode(api, 'target', base);
     await vscode.commands.executeCommand('tabManager.explorer.paste', targetNode);
@@ -1828,6 +1836,40 @@ function git(args: string[]): void {
       GIT_COMMITTER_EMAIL: 'tab-manager-e2e@example.com',
     },
   });
+}
+
+function readMacVsCodeClipboardUris(): string[] {
+  const script = `
+ObjC.import('AppKit');
+(function () {
+  var data = $.NSPasteboard.generalPasteboard.dataForType($('code/file-list'));
+  if (!data.length) return '';
+  return ObjC.unwrap($.NSString.alloc.initWithDataEncoding(data, $.NSUTF8StringEncoding));
+})();
+`;
+  const value = childProcess.execFileSync('osascript', ['-l', 'JavaScript', '-e', script], {
+    encoding: 'utf8',
+  });
+  return value.trim().split(/\r?\n/).filter(Boolean);
+}
+
+function writeMacVsCodeClipboardUris(uris: readonly vscode.Uri[]): boolean {
+  const resources = uris.map((uri) => uri.toString()).join('\n');
+  const script = `
+ObjC.import('AppKit');
+(function () {
+  var pb = $.NSPasteboard.generalPasteboard;
+  var type = $('code/file-list');
+  var data = $(${JSON.stringify(resources)}).dataUsingEncoding($.NSUTF8StringEncoding);
+  pb.clearContents;
+  pb.declareTypesOwner($.NSArray.arrayWithObject(type), $());
+  return pb.setDataForType(data, type) ? 'ok' : 'fail';
+})();
+`;
+  const value = childProcess.execFileSync('osascript', ['-l', 'JavaScript', '-e', script], {
+    encoding: 'utf8',
+  });
+  return value.includes('ok');
 }
 
 async function openFile(

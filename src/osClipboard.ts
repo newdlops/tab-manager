@@ -35,7 +35,10 @@ function run(command: string, args: string[], input?: string, timeoutMs = 5000):
 
     let child;
     try {
-      child = spawn(command, args, { windowsHide: true });
+      child = spawn(command, args, {
+        windowsHide: true,
+        stdio: [input === undefined ? 'ignore' : 'pipe', 'pipe', 'pipe'],
+      });
     } catch {
       resolve({ stdout: '', ok: false });
       return;
@@ -107,9 +110,25 @@ const MAC_READ_SCRIPT = `
 ObjC.import('AppKit');
 (function () {
   var pb = $.NSPasteboard.generalPasteboard;
+  var out = [];
+
+  // VS Code stores Explorer resources in a private newline-delimited URI
+  // format. Reading it preserves the complete selection copied by another
+  // VS Code window, even when no native file URL representation is present.
+  try {
+    var codeData = pb.dataForType($('code/file-list'));
+    if (codeData.length > 0) {
+      var codeText = ObjC.unwrap(
+        $.NSString.alloc.initWithDataEncoding(codeData, $.NSUTF8StringEncoding)
+      );
+      if (typeof codeText === 'string' && codeText.length > 0) {
+        out.push(codeText);
+      }
+    }
+  } catch (e) {}
+
   var classes = $.NSArray.arrayWithObject($.NSURL);
   var urls = pb.readObjectsForClassesOptions(classes, $());
-  var out = [];
   try {
     var n = urls.count;
     for (var i = 0; i < n; i++) {
@@ -121,29 +140,52 @@ ObjC.import('AppKit');
 })();
 `;
 
-function macWriteScript(paths: string[]): string {
-  return `
+const MAC_WRITE_SCRIPT = `
 ObjC.import('AppKit');
-(function () {
-  var paths = ${JSON.stringify(paths)};
+function run(argv) {
+  var payload = JSON.parse(argv[0]);
+  var paths = payload.paths;
+  var resources = payload.resources;
   var pb = $.NSPasteboard.generalPasteboard;
-  pb.clearContents;
-  var arr = $.NSMutableArray.alloc.init;
+  var filenamesType = $('NSFilenamesPboardType');
+  var codeFileListType = $('code/file-list');
+  var types = $.NSMutableArray.alloc.init;
+  types.addObject(filenamesType);
+  types.addObject(codeFileListType);
+  var pathList = $.NSMutableArray.alloc.init;
   for (var i = 0; i < paths.length; i++) {
-    arr.addObject($.NSURL.fileURLWithPath($(paths[i])));
+    pathList.addObject($(paths[i]));
   }
-  return pb.writeObjects(arr) ? 'ok' : 'fail';
-})();
-`;
+  var codeData = $(resources).dataUsingEncoding($.NSUTF8StringEncoding);
+
+  pb.clearContents;
+  pb.declareTypesOwner(types, $());
+  var wroteFiles = pb.setPropertyListForType(pathList, filenamesType);
+  var wroteCodeFileList = pb.setDataForType(codeData, codeFileListType);
+  return wroteFiles && wroteCodeFileList ? 'ok' : 'fail';
 }
+`;
 
 async function readMac(): Promise<vscode.Uri[]> {
-  const result = await run('osascript', ['-l', 'JavaScript'], MAC_READ_SCRIPT);
+  // Passing JXA source via `-e` is required for the Objective-C bridge to
+  // resolve NSPasteboard selectors reliably.
+  const result = await run('osascript', ['-l', 'JavaScript', '-e', MAC_READ_SCRIPT]);
   return result.ok ? parsePathList(result.stdout) : [];
 }
 
 async function writeMac(paths: string[]): Promise<boolean> {
-  const result = await run('osascript', ['-l', 'JavaScript'], macWriteScript(paths));
+  const payload = JSON.stringify({
+    paths,
+    resources: paths.map((path) => vscode.Uri.file(path).toString()).join('\n'),
+  });
+  const result = await run('osascript', [
+    '-l',
+    'JavaScript',
+    '-e',
+    MAC_WRITE_SCRIPT,
+    '--',
+    payload,
+  ]);
   return result.ok && result.stdout.includes('ok');
 }
 

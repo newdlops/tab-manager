@@ -4,6 +4,9 @@ All notable changes are documented here.
 
 ## [Unreleased]
 
+### Fixed
+- Copying multiple Extended Explorer files now preserves the complete selection when pasting into another VS Code window on macOS.
+
 ### UI and usability
 - Simplified Open Tabs and Extended Explorer header actions.
 - Clarified view, filter, sort, empty, loading, and read-error states.
