@@ -28,7 +28,7 @@ A VS Code extension that brings grouping, filtering, and sorting to open tabs â€
 - **Inline New File / New Folder** â€” a placeholder item appears inside the target folder and updates live as you type in the input box
 - **Deleted files** appear as ghost entries (greyed out, `deleted` label) when the Deleted filter is on
 - **Refresh** shows view-scoped progress while it forces a `git status` rescan on every repository before refreshing
-- **Optional metadata** shows file size and line count next to file names
+- **Optional metadata** shows file size and line count next to file names; file rows appear first, then details fill in without blocking the tree
 - **Cut / Copy / Paste** works across the OS clipboard â€” paste files copied in Finder, File Explorer, or another VS Code window, and files you copy here can be pasted into those apps too (`Ctrl/Cmd+X`, `Ctrl/Cmd+C`, `Ctrl/Cmd+V`)
 - **Context menu**: Open / Open to Side / Reveal in File Explorer / Open in Integrated Terminal / Cut / Copy / Paste / Copy Path / Copy Relative Path / Compare This File with Branch / Rename / Delete / New File / New Folder
 - **Title bar**: New File, New Folder, Reveal Active File, and Refresh; metadata, filters, sorting, and expanded-tree actions are in the overflow menu
@@ -38,7 +38,10 @@ A VS Code extension that brings grouping, filtering, and sorting to open tabs â€
 - Saved project folders and `.code-workspace` files are listed in a separate Explorer section
 - Clicking a project opens it in a new VS Code window
 - Use the title-bar actions to add a folder or add the current workspace
-- Use the context menu to remove a saved project from the list
+- Add several projects at once from folders or workspaces Tab Manager has seen since it started tracking them (up to 40 recent entries)
+- For older folders in VS Code's own history, open them once via **File â†’ Open Recent**; they then appear in Tab Manager's recent picker
+- Sort saved projects by name, last opened, or added order from the view menu; the choice is remembered
+- Remove one saved project from its context menu, or use the view menu to remove several saved projects or forget recent entries
 
 ### Filters
 

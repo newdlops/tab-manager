@@ -6,7 +6,16 @@ export interface SavedProject {
   uri: vscode.Uri;
 }
 
+export interface RecentProject extends SavedProject {
+  lastOpened: number;
+}
+
+export type ProjectSortMode = 'nameAsc' | 'nameDesc' | 'recent' | 'added';
+
 const PROJECTS_KEY = 'tabManager.projects';
+const RECENT_PROJECTS_KEY = 'tabManager.recentProjects';
+const PROJECT_SORT_KEY = 'tabManager.projectSort';
+const MAX_RECENT_PROJECTS = 40;
 
 export class ProjectNode extends vscode.TreeItem {
   constructor(public readonly project: SavedProject) {
@@ -36,14 +45,120 @@ export class ProjectStore implements vscode.Disposable {
   readonly onDidChange = this._onDidChange.event;
 
   private cachedProjects?: SavedProject[];
+  private cachedRecentProjects?: RecentProject[];
+  private cachedSortMode?: ProjectSortMode;
 
-  constructor(private readonly context: vscode.ExtensionContext) {}
+  constructor(private readonly context: vscode.ExtensionContext) {
+    void this.recordCurrentWorkspace();
+    context.subscriptions.push(
+      vscode.workspace.onDidChangeWorkspaceFolders(() => void this.recordCurrentWorkspace()),
+      vscode.window.onDidChangeWindowState((state) => {
+        if (state.focused) this.refreshFromStorage();
+      }),
+    );
+  }
+
+  refreshFromStorage(): void {
+    const before = JSON.stringify({
+      projects: this.cachedProjects?.map((project) => project.uri.toString()),
+      recent: this.cachedRecentProjects?.map((project) => [project.uri.toString(), project.lastOpened]),
+      sort: this.cachedSortMode,
+    });
+    this.cachedProjects = normalizeProjects(this.context.globalState.get<unknown>(PROJECTS_KEY));
+    this.cachedRecentProjects = normalizeRecentProjects(this.context.globalState.get<unknown>(RECENT_PROJECTS_KEY));
+    const storedSort = this.context.globalState.get<unknown>(PROJECT_SORT_KEY);
+    this.cachedSortMode = isProjectSortMode(storedSort) ? storedSort : 'nameAsc';
+    const after = JSON.stringify({
+      projects: this.cachedProjects.map((project) => project.uri.toString()),
+      recent: this.cachedRecentProjects.map((project) => [project.uri.toString(), project.lastOpened]),
+      sort: this.cachedSortMode,
+    });
+    if (before !== after) this._onDidChange.fire();
+  }
 
   getProjects(): SavedProject[] {
     if (!this.cachedProjects) {
       this.cachedProjects = normalizeProjects(this.context.globalState.get<unknown>(PROJECTS_KEY));
     }
     return this.cachedProjects;
+  }
+
+  getSortedProjects(): SavedProject[] {
+    const projects = [...this.getProjects()];
+    const mode = this.getSortMode();
+    if (mode === 'added') return projects;
+    const recent = mode === 'recent'
+      ? new Map(this.getRecentProjects().map((project) => [project.uri.toString(), project.lastOpened]))
+      : undefined;
+    projects.sort((a, b) => {
+      if (mode === 'recent') {
+        const byTime = (recent?.get(b.uri.toString()) ?? 0) - (recent?.get(a.uri.toString()) ?? 0);
+        if (byTime) return byTime;
+      }
+      const byName = projectLabel(a.uri).localeCompare(projectLabel(b.uri), undefined, {
+        numeric: true,
+        sensitivity: 'base',
+      });
+      if (byName) return mode === 'nameDesc' ? -byName : byName;
+      return a.uri.toString().localeCompare(b.uri.toString());
+    });
+    return projects;
+  }
+
+  getRecentProjects(): RecentProject[] {
+    if (!this.cachedRecentProjects) {
+      this.cachedRecentProjects = normalizeRecentProjects(this.context.globalState.get<unknown>(RECENT_PROJECTS_KEY));
+    }
+    return this.cachedRecentProjects;
+  }
+
+  getSortMode(): ProjectSortMode {
+    if (!this.cachedSortMode) {
+      const stored = this.context.globalState.get<unknown>(PROJECT_SORT_KEY);
+      this.cachedSortMode = isProjectSortMode(stored) ? stored : 'nameAsc';
+    }
+    return this.cachedSortMode;
+  }
+
+  async setSortMode(mode: ProjectSortMode): Promise<void> {
+    if (mode === this.getSortMode()) return;
+    this.cachedSortMode = mode;
+    await this.persistGlobalState(PROJECT_SORT_KEY, mode);
+    this._onDidChange.fire();
+  }
+
+  async recordCurrentWorkspace(): Promise<void> {
+    await this.recordRecentProjects(currentWorkspaceProjectUris());
+  }
+
+  async recordRecentProjects(uris: readonly vscode.Uri[]): Promise<void> {
+    if (uris.length === 0) return;
+    const current = this.getRecentProjects();
+    const unique = [...new Map(uris.map((uri) => [uri.toString(), uri])).values()];
+    const keys = new Set(unique.map((uri) => uri.toString()));
+    const timestamp = Math.max(Date.now(), (current[0]?.lastOpened ?? 0) + 1);
+    const next = [
+      ...unique.map((uri) => ({ uri, lastOpened: timestamp })),
+      ...current.filter((project) => !keys.has(project.uri.toString())),
+    ].slice(0, MAX_RECENT_PROJECTS);
+    this.cachedRecentProjects = next;
+    await this.persistGlobalState(
+      RECENT_PROJECTS_KEY,
+      next.map((project) => ({ uri: project.uri.toString(), lastOpened: project.lastOpened })),
+    );
+    if (this.getSortMode() === 'recent') this._onDidChange.fire();
+  }
+
+  async forgetRecentProjects(uris: readonly vscode.Uri[]): Promise<void> {
+    const keys = new Set(uris.map((uri) => uri.toString()));
+    const next = this.getRecentProjects().filter((project) => !keys.has(project.uri.toString()));
+    if (next.length === this.getRecentProjects().length) return;
+    this.cachedRecentProjects = next;
+    await this.persistGlobalState(
+      RECENT_PROJECTS_KEY,
+      next.length ? next.map((project) => ({ uri: project.uri.toString(), lastOpened: project.lastOpened })) : undefined,
+    );
+    if (this.getSortMode() === 'recent') this._onDidChange.fire();
   }
 
   async addProjects(uris: readonly vscode.Uri[]): Promise<number> {
@@ -66,8 +181,12 @@ export class ProjectStore implements vscode.Disposable {
   }
 
   async removeProject(uri: vscode.Uri): Promise<void> {
-    const key = uri.toString();
-    const next = this.getProjects().filter((project) => project.uri.toString() !== key);
+    await this.removeProjects([uri]);
+  }
+
+  async removeProjects(uris: readonly vscode.Uri[]): Promise<void> {
+    const keys = new Set(uris.map((uri) => uri.toString()));
+    const next = this.getProjects().filter((project) => !keys.has(project.uri.toString()));
     if (next.length === this.getProjects().length) return;
     await this.setProjects(next);
   }
@@ -118,7 +237,7 @@ export class ProjectProvider
 
   getChildren(element?: ProjectNode): ProjectNode[] {
     if (element) return [];
-    return this.store.getProjects().map((project) => new ProjectNode(project));
+    return this.store.getSortedProjects().map((project) => new ProjectNode(project));
   }
 
   dispose(): void {
@@ -141,7 +260,7 @@ export function registerProjectCommands(
     vscode.commands.registerCommand('tabManager.projects.open', async (node?: ProjectNode | vscode.Uri) => {
       const uri = node instanceof vscode.Uri ? node : node?.project.uri;
       if (!uri) return;
-      await openProject(uri);
+      if (await openProject(uri)) await store.recordRecentProjects([uri]);
     }),
 
     vscode.commands.registerCommand('tabManager.projects.addFolder', async () => {
@@ -172,16 +291,96 @@ export function registerProjectCommands(
       if (!project) return;
       await store.removeProject(project.project.uri);
     }),
+
+    vscode.commands.registerCommand('tabManager.projects.addRecent', async () => {
+      const recent = store.getRecentProjects();
+      const saved = new Set(store.getProjects().map((project) => project.uri.toString()));
+      const available = recent.filter((project) => !saved.has(project.uri.toString()));
+      if (available.length === 0) {
+        const action = await vscode.window.showInformationMessage(
+          recent.length > 0
+            ? 'All recently seen projects are already saved.'
+            : 'No recent projects yet. Open a folder or workspace in VS Code to see it here.',
+          'Open VS Code Recent',
+        );
+        if (action) await vscode.commands.executeCommand('workbench.action.openRecent');
+        return;
+      }
+      const picks = await vscode.window.showQuickPick(
+        available.map((project) => ({
+          label: projectLabel(project.uri),
+          description: projectFullLocation(project.uri),
+          project,
+        })),
+        { canPickMany: true, title: 'Add Recent Projects', placeHolder: 'Select folders or workspaces to save' },
+      );
+      if (picks?.length) await addExistingProjects(store, picks.map((pick) => pick.project.uri));
+    }),
+
+    vscode.commands.registerCommand('tabManager.projects.sort', async () => {
+      const options: { mode: ProjectSortMode; label: string }[] = [
+        { mode: 'nameAsc', label: 'Name A–Z' },
+        { mode: 'nameDesc', label: 'Name Z–A' },
+        { mode: 'recent', label: 'Recently Opened' },
+        { mode: 'added', label: 'Added Order' },
+      ];
+      const current = store.getSortMode();
+      const pick = await vscode.window.showQuickPick(
+        options.map((option) => ({
+          label: option.label,
+          description: option.mode === current ? 'Current' : undefined,
+          mode: option.mode,
+        })),
+        { title: 'Sort Projects', placeHolder: 'Choose project order' },
+      );
+      if (pick) await store.setSortMode(pick.mode);
+    }),
+
+    vscode.commands.registerCommand('tabManager.projects.removeMany', async () => {
+      const projects = store.getSortedProjects();
+      if (projects.length === 0) {
+        void vscode.window.showInformationMessage('No saved projects to remove.');
+        return;
+      }
+      const picks = await vscode.window.showQuickPick(
+        projects.map((project) => ({
+          label: projectLabel(project.uri),
+          description: projectFullLocation(project.uri),
+          project,
+        })),
+        { canPickMany: true, title: 'Remove Saved Projects', placeHolder: 'Select projects to remove from Tab Manager' },
+      );
+      if (picks?.length) await store.removeProjects(picks.map((pick) => pick.project.uri));
+    }),
+
+    vscode.commands.registerCommand('tabManager.projects.forgetRecent', async () => {
+      const projects = store.getRecentProjects();
+      if (projects.length === 0) {
+        void vscode.window.showInformationMessage('No recent projects to forget.');
+        return;
+      }
+      const picks = await vscode.window.showQuickPick(
+        projects.map((project) => ({
+          label: projectLabel(project.uri),
+          description: projectFullLocation(project.uri),
+          project,
+        })),
+        { canPickMany: true, title: 'Forget Recent Projects', placeHolder: 'Select recent projects to forget' },
+      );
+      if (picks?.length) await store.forgetRecentProjects(picks.map((pick) => pick.project.uri));
+    }),
   );
 }
 
-async function openProject(uri: vscode.Uri): Promise<void> {
+async function openProject(uri: vscode.Uri): Promise<boolean> {
   try {
     await vscode.commands.executeCommand('vscode.openFolder', uri, true);
+    return true;
   } catch (error) {
     vscode.window.showErrorMessage(
       `Failed to open project "${projectLabel(uri)}": ${formatOpenError(error)}`,
     );
+    return false;
   }
 }
 
@@ -190,14 +389,24 @@ async function addExistingProjects(
   uris: readonly vscode.Uri[],
 ): Promise<void> {
   const valid: vscode.Uri[] = [];
-  for (const uri of uris) {
-    if (await isProjectUri(uri)) {
-      valid.push(uri);
-    } else {
-      vscode.window.showWarningMessage(
-        `"${projectFullLocation(uri)}" is not a folder or VS Code workspace file.`,
-      );
+  const invalid: vscode.Uri[] = [];
+  for (let start = 0; start < uris.length; start += 4) {
+    const batch = uris.slice(start, start + 4);
+    const results = await Promise.all(batch.map(isProjectUri));
+    for (const [index, uri] of batch.entries()) {
+      if (results[index]) {
+        valid.push(uri);
+      } else {
+        invalid.push(uri);
+      }
     }
+  }
+  if (invalid.length > 0) {
+    const locations = invalid.slice(0, 3).map((uri) => `"${projectFullLocation(uri)}"`).join(', ');
+    const remainder = invalid.length > 3 ? ` and ${invalid.length - 3} more` : '';
+    void vscode.window.showWarningMessage(
+      `${invalid.length} selected project${invalid.length === 1 ? '' : 's'} could not be added: ${locations}${remainder}.`,
+    );
   }
   if (valid.length === 0) return;
   await store.addProjects(valid);
@@ -213,8 +422,35 @@ async function isProjectUri(uri: vscode.Uri): Promise<boolean> {
 }
 
 function currentWorkspaceProjectUris(): vscode.Uri[] {
-  if (vscode.workspace.workspaceFile) return [vscode.workspace.workspaceFile];
+  if (vscode.workspace.workspaceFile && isWorkspaceFile(vscode.workspace.workspaceFile)) {
+    return [vscode.workspace.workspaceFile];
+  }
   return (vscode.workspace.workspaceFolders ?? []).map((folder) => folder.uri);
+}
+
+function isProjectSortMode(value: unknown): value is ProjectSortMode {
+  return value === 'nameAsc' || value === 'nameDesc' || value === 'recent' || value === 'added';
+}
+
+function normalizeRecentProjects(raw: unknown): RecentProject[] {
+  if (!Array.isArray(raw)) return [];
+  const projects: RecentProject[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const { uri: value, lastOpened } = item as { uri?: unknown; lastOpened?: unknown };
+    if (typeof value !== 'string' || !value || typeof lastOpened !== 'number' || !Number.isFinite(lastOpened)) continue;
+    try {
+      const uri = vscode.Uri.parse(value);
+      const key = uri.toString();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      projects.push({ uri, lastOpened });
+    } catch {
+      continue;
+    }
+  }
+  return projects.sort((a, b) => b.lastOpened - a.lastOpened).slice(0, MAX_RECENT_PROJECTS);
 }
 
 function normalizeProjects(raw: unknown): SavedProject[] {

@@ -2,7 +2,7 @@
   "name": "tab-manager",
   "displayName": "Tab Manager",
   "description": "Group, filter, and sort open tabs and workspace files from the activity bar and Explorer.",
-  "version": "0.1.6615",
+  "version": "0.1.6617",
   "publisher": "newdlops",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -99,12 +99,12 @@
       },
       {
         "view": "tabManagerProjects",
-        "contents": "No saved projects.\n[Add Project Folder](command:tabManager.projects.addFolder)",
+        "contents": "No saved projects.\n[Add Project Folder](command:tabManager.projects.addFolder) or [add from recent projects](command:tabManager.projects.addRecent).",
         "when": "workbenchState == empty"
       },
       {
         "view": "tabManagerProjects",
-        "contents": "No saved projects.\n[Add Current Workspace](command:tabManager.projects.addCurrentWorkspace)\nOr [add another folder](command:tabManager.projects.addFolder).",
+        "contents": "No saved projects.\n[Add Current Workspace](command:tabManager.projects.addCurrentWorkspace)\nOr [add from recent projects](command:tabManager.projects.addRecent).",
         "when": "workbenchState != empty"
       }
     ],
@@ -531,6 +531,29 @@
         "title": "Remove Project",
         "icon": "$(trash)",
         "category": "Projects"
+      },
+      {
+        "command": "tabManager.projects.addRecent",
+        "title": "Add Recently Opened Projects...",
+        "shortTitle": "Add from Recent...",
+        "icon": "$(history)",
+        "category": "Projects"
+      },
+      {
+        "command": "tabManager.projects.sort",
+        "title": "Sort Projects...",
+        "icon": "$(sort-precedence)",
+        "category": "Projects"
+      },
+      {
+        "command": "tabManager.projects.removeMany",
+        "title": "Remove Saved Projects...",
+        "category": "Projects"
+      },
+      {
+        "command": "tabManager.projects.forgetRecent",
+        "title": "Forget Recent Projects...",
+        "category": "Projects"
       }
     ],
     "menus": {
@@ -610,6 +633,26 @@
           "command": "tabManager.projects.addCurrentWorkspace",
           "when": "view == tabManagerProjects && workbenchState != empty",
           "group": "navigation@2"
+        },
+        {
+          "command": "tabManager.projects.addRecent",
+          "when": "view == tabManagerProjects",
+          "group": "navigation@3"
+        },
+        {
+          "command": "tabManager.projects.sort",
+          "when": "view == tabManagerProjects",
+          "group": "1_sort@1"
+        },
+        {
+          "command": "tabManager.projects.removeMany",
+          "when": "view == tabManagerProjects",
+          "group": "2_manage@1"
+        },
+        {
+          "command": "tabManager.projects.forgetRecent",
+          "when": "view == tabManagerProjects",
+          "group": "2_manage@2"
         },
         {
           "command": "tabManager.filter.modified",

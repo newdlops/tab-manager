@@ -6,7 +6,7 @@ import * as vscode from 'vscode';
 import { GroupStore } from '../../groupStore';
 import { comparisonEntriesFromSnapshot } from '../../comparisonSource';
 import { ExplorerErrorNode } from '../../explorerProvider';
-import { ProjectNode } from '../../projectProvider';
+import { ProjectNode, type ProjectSortMode, type RecentProject, type SavedProject } from '../../projectProvider';
 
 type FilterMode =
   | 'none'
@@ -95,6 +95,21 @@ interface TestApi {
   tabView: vscode.TreeView<unknown>;
   explorerView: vscode.TreeView<unknown>;
   projectsView: vscode.TreeView<unknown>;
+  projectStore: {
+    getProjects(): SavedProject[];
+    getSortedProjects(): SavedProject[];
+    getRecentProjects(): RecentProject[];
+    getSortMode(): ProjectSortMode;
+    addProjects(uris: readonly vscode.Uri[]): Promise<number>;
+    removeProjects(uris: readonly vscode.Uri[]): Promise<void>;
+    recordRecentProjects(uris: readonly vscode.Uri[]): Promise<void>;
+    forgetRecentProjects(uris: readonly vscode.Uri[]): Promise<void>;
+    setSortMode(mode: ProjectSortMode): Promise<void>;
+    refreshFromStorage(): void;
+  };
+  projectProvider: {
+    getChildren(): ProjectNode[];
+  };
 }
 
 const root = process.env.TAB_MANAGER_E2E_ROOT!;
@@ -256,16 +271,69 @@ suite('Tab Manager E2E', () => {
         ],
         [
           'tabManagerProjects',
-          'No saved projects.\n[Add Project Folder](command:tabManager.projects.addFolder)',
+          'No saved projects.\n[Add Project Folder](command:tabManager.projects.addFolder) or [add from recent projects](command:tabManager.projects.addRecent).',
           'workbenchState == empty',
         ],
         [
           'tabManagerProjects',
-          'No saved projects.\n[Add Current Workspace](command:tabManager.projects.addCurrentWorkspace)\nOr [add another folder](command:tabManager.projects.addFolder).',
+          'No saved projects.\n[Add Current Workspace](command:tabManager.projects.addCurrentWorkspace)\nOr [add from recent projects](command:tabManager.projects.addRecent).',
           'workbenchState != empty',
         ],
       ],
     );
+  });
+
+  test('sorts saved projects and manages bounded recent history', async () => {
+    const store = api.projectStore;
+    const priorSort = store.getSortMode();
+    const priorRecent = store.getRecentProjects().map((project) => project.uri);
+    const projects = ['Zulu', 'Alpha 10', 'Alpha 2'].map((name) =>
+      vscode.Uri.file(path.join(workspaceRoot, name)),
+    );
+    const current = vscode.Uri.file(workspaceRoot);
+    try {
+      await store.addProjects(projects);
+      await store.setSortMode('nameAsc');
+      assert.deepStrictEqual(
+        api.projectProvider.getChildren().map((node) => node.label),
+        ['Alpha 2', 'Alpha 10', 'Zulu'],
+      );
+
+      await store.setSortMode('nameDesc');
+      assert.deepStrictEqual(
+        store.getSortedProjects().map((project) => path.basename(project.uri.fsPath)),
+        ['Zulu', 'Alpha 10', 'Alpha 2'],
+      );
+
+      await store.recordRecentProjects([projects[0]]);
+      await store.recordRecentProjects([projects[2]]);
+      await store.setSortMode('recent');
+      store.refreshFromStorage();
+      assert.strictEqual(store.getSortMode(), 'recent');
+      assert.deepStrictEqual(
+        store.getSortedProjects().map((project) => path.basename(project.uri.fsPath)),
+        ['Alpha 2', 'Zulu', 'Alpha 10'],
+      );
+
+      const extra = Array.from({ length: 45 }, (_, index) =>
+        vscode.Uri.file(path.join(workspaceRoot, `Recent ${index}`)),
+      );
+      await store.recordRecentProjects(extra);
+      assert.strictEqual(store.getRecentProjects().length, 40);
+      await store.forgetRecentProjects([extra[0]]);
+      assert.ok(!store.getRecentProjects().some((project) => project.uri.toString() === extra[0].toString()));
+
+      await store.removeProjects(projects);
+      assert.ok(!store.getProjects().some((project) => projects.some((uri) => uri.toString() === project.uri.toString())));
+
+      await vscode.commands.executeCommand('tabManager.projects.addCurrentWorkspace');
+      assert.ok(store.getProjects().some((project) => project.uri.toString() === current.toString()));
+    } finally {
+      await store.removeProjects([...projects, current]);
+      await store.forgetRecentProjects(store.getRecentProjects().map((project) => project.uri));
+      await store.recordRecentProjects(priorRecent);
+      await store.setSortMode(priorSort);
+    }
   });
 
   test('executes state-specific clear, hide, and stop aliases safely', async () => {
@@ -1084,7 +1152,7 @@ suite('Tab Manager E2E', () => {
       fileSize: true,
       lineCount: false,
     });
-    assert.strictEqual(description(await waitForExplorerNode(api, 'metadata.txt')), '8 B');
+    assert.strictEqual(description(await waitForExplorerDescription(api, 'metadata.txt', '8 B')), '8 B');
 
     await vscode.commands.executeCommand('tabManager.explorer.toggleLineCount');
     assert.deepStrictEqual(api.store.getExplorerDisplayOptions(), {
@@ -1092,11 +1160,11 @@ suite('Tab Manager E2E', () => {
       lineCount: true,
     });
     assert.strictEqual(
-      description(await waitForExplorerNode(api, 'metadata.txt')),
+      description(await waitForExplorerDescription(api, 'metadata.txt', '8 B · 2 lines')),
       '8 B · 2 lines',
     );
     assert.deepStrictEqual(
-      (await waitForExplorerNode(api, 'metadata.txt') as vscode.TreeItem).accessibilityInformation,
+      (await waitForExplorerDescription(api, 'metadata.txt', '8 B · 2 lines') as vscode.TreeItem).accessibilityInformation,
       {
         label: `metadata.txt, ${target.fsPath}, 8 B, 2 lines, Open File`,
         role: 'treeitem',
@@ -1123,7 +1191,7 @@ suite('Tab Manager E2E', () => {
       fileSize: false,
       lineCount: true,
     });
-    assert.strictEqual(description(await waitForExplorerNode(api, 'metadata.txt')), '3 lines');
+    assert.strictEqual(description(await waitForExplorerDescription(api, 'metadata.txt', '3 lines')), '3 lines');
 
     await vscode.commands.executeCommand('tabManager.explorer.toggleLineCount');
     assert.deepStrictEqual(api.store.getExplorerDisplayOptions(), {
@@ -1925,6 +1993,18 @@ async function waitForExplorerNode(
     const nodes = parent ? await explorerChildrenForUri(api, parent) : await explorerRoots(api);
     return nodes.find((node) => label(node) === wanted);
   }, `Explorer node ${wanted}`);
+}
+
+async function waitForExplorerDescription(
+  api: TestApi,
+  wanted: string,
+  expected: string,
+): Promise<unknown> {
+  return waitFor(async () => {
+    const nodes = await api.explorerProvider.getChildren(undefined);
+    const node = nodes.find((candidate) => label(candidate) === wanted);
+    return node && description(node) === expected ? node : undefined;
+  }, `Explorer description ${wanted}: ${expected}`);
 }
 
 async function explorerChildrenForUri(api: TestApi, parent: vscode.Uri): Promise<unknown[]> {
