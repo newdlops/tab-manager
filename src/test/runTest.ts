@@ -2,7 +2,7 @@ import * as childProcess from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { runTests } from '@vscode/test-electron';
+import { downloadAndUnzipVSCode, runTests } from '@vscode/test-electron';
 
 function writeFile(root: string, relativePath: string, content: string): void {
   const target = path.join(root, relativePath);
@@ -53,7 +53,16 @@ async function main(): Promise<void> {
   prepareWorkspace(workspacePath);
 
   try {
+    const downloadedExecutable = await downloadAndUnzipVSCode({});
+    const vscodeExecutablePath =
+      process.platform === 'darwin' &&
+      path.basename(downloadedExecutable) === 'Electron' &&
+      !fs.existsSync(downloadedExecutable) &&
+      fs.existsSync(path.join(path.dirname(downloadedExecutable), 'Code'))
+        ? path.join(path.dirname(downloadedExecutable), 'Code')
+        : downloadedExecutable;
     await runTests({
+      vscodeExecutablePath,
       extensionDevelopmentPath,
       extensionTestsPath,
       launchArgs: [
