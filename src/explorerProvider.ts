@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import * as fs from 'fs';
 import type { ExplorerDisplayOptions, GroupStore, FilterMode, SortState } from './groupStore';
 import type {
   FileSystemChangeKind,
@@ -134,7 +135,13 @@ interface CachedFileMetadata {
   lineCountComputed: boolean;
 }
 
-const FILE_METADATA_CONCURRENCY = 8;
+interface FileMetadataTask {
+  uri: vscode.Uri;
+  parent: vscode.Uri;
+  controller: AbortController;
+}
+
+const FILE_METADATA_CONCURRENCY = 4;
 const MAX_TARGETED_DIRECTORY_REFRESHES = 8;
 
 export class ExplorerProvider
@@ -159,7 +166,13 @@ export class ExplorerProvider
     deletedDirectoriesByParent?: Map<string, vscode.Uri[]>;
   };
   private readonly dirCache = new Map<string, [string, vscode.FileType][]>();
-  private readonly fileMetadataCache = new Map<string, CachedFileMetadata>();
+  private readonly fileMetadataCache = new Map<string, CachedFileMetadata | null>();
+  private readonly fileMetadataTasks = new Map<string, FileMetadataTask>();
+  private readonly fileMetadataQueue: FileMetadataTask[] = [];
+  private fileMetadataQueueIndex = 0;
+  private readonly pendingFileMetadataParents = new Map<string, vscode.Uri>();
+  private activeFileMetadataTasks = 0;
+  private fileMetadataRefreshTimer?: ReturnType<typeof setTimeout>;
   private readonly directoryWatchers = new Map<string, vscode.FileSystemWatcher>();
   private readonly openTabDirectoryKeys = new Set<string>();
   private readonly directoryNodes = new Map<string, DirectoryNode>();
@@ -256,6 +269,7 @@ export class ExplorerProvider
     this.cache = undefined;
     this.dirCache.clear();
     this.fileMetadataCache.clear();
+    this.clearPendingFileMetadata();
     this.directoryNodes.clear();
     this.workspaceFolderNodes.clear();
     this.pendingDirectoryRefreshes.clear();
@@ -271,6 +285,7 @@ export class ExplorerProvider
     const mode = this.store.getFilterMode();
     if (event && (mode === 'none' || !event.modes.includes(mode))) return;
     this.cache = undefined;
+    this.clearPendingFileMetadata();
     this.pruneDirectoryWatchersForFilter(mode);
     this._onDidChangeTreeData.fire(undefined);
   }
@@ -290,7 +305,10 @@ export class ExplorerProvider
     this.lastExplorerDisplayOptions = displayOptions;
 
     if (filterChanged) this.refreshFilter();
-    else if (sortChanged || displayChanged) this.requestRedraw();
+    else if (sortChanged || displayChanged) {
+      if (displayChanged) this.clearPendingFileMetadata();
+      this.requestRedraw();
+    }
   }
 
   invalidateDirectory(uri: vscode.Uri): boolean {
@@ -305,6 +323,7 @@ export class ExplorerProvider
 
   dispose(): void {
     for (const disposable of this.disposables) disposable.dispose();
+    this.clearPendingFileMetadata();
     this.disposeDirectoryWatchers();
     this.pendingDirectoryRefreshes.clear();
     this._onDidChangeTreeData.dispose();
@@ -444,13 +463,12 @@ export class ExplorerProvider
     }
 
     if (displayOptions.fileSize || displayOptions.lineCount) {
-      nodes.push(
-        ...(await mapWithConcurrency(
-          liveFiles,
-          FILE_METADATA_CONCURRENCY,
-          (uri) => this.createFileNode(uri, displayOptions),
-        )),
-      );
+      for (const uri of liveFiles) {
+        nodes.push(new FileNode(uri, false, {
+          descriptionParts: this.getCachedFileDescriptionParts(uri, displayOptions),
+        }));
+        this.queueFileMetadata(uri, folder, displayOptions);
+      }
     } else {
       nodes.push(...liveFiles.map((uri) => new FileNode(uri)));
     }
@@ -482,47 +500,116 @@ export class ExplorerProvider
     return nodes;
   }
 
-  private async createFileNode(
+  private getCachedFileDescriptionParts(
     uri: vscode.Uri,
     displayOptions: ExplorerDisplayOptions,
-  ): Promise<FileNode> {
-    const descriptionParts = await this.getFileDescriptionParts(uri, displayOptions);
-    return new FileNode(uri, false, { descriptionParts });
+  ): string[] {
+    if (!displayOptions.fileSize && !displayOptions.lineCount) return [];
+    const metadata = this.fileMetadataCache.get(uri.toString());
+    if (!metadata) return [];
+    const parts: string[] = [];
+    if (displayOptions.fileSize) parts.push(formatFileSize(metadata.size));
+    if (displayOptions.lineCount && metadata.lineCount !== undefined) {
+      parts.push(formatLineCount(metadata.lineCount));
+    }
+    return parts;
   }
 
-  private async getFileDescriptionParts(
+  private queueFileMetadata(
     uri: vscode.Uri,
+    parent: vscode.Uri,
     displayOptions: ExplorerDisplayOptions,
-  ): Promise<string[]> {
-    if (!displayOptions.fileSize && !displayOptions.lineCount) return [];
-
-    try {
-      const key = uri.toString();
-      let metadata = this.fileMetadataCache.get(key);
-      if (!metadata) {
-        const stat = await vscode.workspace.fs.stat(uri);
-        if (!(stat.type & vscode.FileType.File)) return [];
-        metadata = {
-          size: stat.size,
-          lineCountComputed: false,
-        };
-        this.fileMetadataCache.set(key, metadata);
-      }
-
-      if (displayOptions.lineCount && !metadata.lineCountComputed) {
-        metadata.lineCount = countLines(await vscode.workspace.fs.readFile(uri));
-        metadata.lineCountComputed = true;
-      }
-
-      const parts: string[] = [];
-      if (displayOptions.fileSize) parts.push(formatFileSize(metadata.size));
-      if (displayOptions.lineCount && metadata.lineCount !== undefined) {
-        parts.push(formatLineCount(metadata.lineCount));
-      }
-      return parts;
-    } catch {
-      return [];
+  ): void {
+    if (!displayOptions.fileSize && !displayOptions.lineCount) return;
+    const key = uri.toString();
+    const cached = this.fileMetadataCache.get(key);
+    if (cached === null || (cached && (!displayOptions.lineCount || cached.lineCountComputed))) {
+      return;
     }
+    if (this.fileMetadataTasks.has(key)) return;
+    const task = { uri, parent, controller: new AbortController() };
+    this.fileMetadataTasks.set(key, task);
+    this.fileMetadataQueue.push(task);
+    this.pumpFileMetadata();
+  }
+
+  private pumpFileMetadata(): void {
+    while (this.activeFileMetadataTasks < FILE_METADATA_CONCURRENCY && this.fileMetadataQueueIndex < this.fileMetadataQueue.length) {
+      const task = this.fileMetadataQueue[this.fileMetadataQueueIndex++];
+      const key = task.uri.toString();
+      if (this.fileMetadataTasks.get(key) !== task) continue;
+      this.activeFileMetadataTasks++;
+      void this.readFileMetadata(task).catch(() => null).then((metadata) => {
+        if (this.fileMetadataTasks.get(key) !== task) return;
+        this.fileMetadataTasks.delete(key);
+        this.fileMetadataCache.set(key, metadata);
+        this.scheduleFileMetadataRefresh(task.parent);
+      }).finally(() => {
+        this.activeFileMetadataTasks--;
+        this.pumpFileMetadata();
+      });
+    }
+    if (this.fileMetadataQueueIndex === this.fileMetadataQueue.length) {
+      this.fileMetadataQueue.length = 0;
+      this.fileMetadataQueueIndex = 0;
+    }
+  }
+
+  private async readFileMetadata(task: FileMetadataTask): Promise<CachedFileMetadata | null> {
+    const { uri } = task;
+    const key = uri.toString();
+    let metadata = this.fileMetadataCache.get(key);
+    if (!metadata) {
+      try {
+        const stat = await vscode.workspace.fs.stat(uri);
+        if (!(stat.type & vscode.FileType.File)) return null;
+        metadata = { size: stat.size, lineCountComputed: false };
+      } catch {
+        return null;
+      }
+    }
+    if (this.store.getExplorerDisplayOptions().lineCount && !metadata.lineCountComputed) {
+      try {
+        metadata = {
+          ...metadata,
+          lineCount: uri.scheme === 'file'
+            ? await countFileLines(uri.fsPath, task.controller.signal)
+            : countLines(await vscode.workspace.fs.readFile(uri)),
+          lineCountComputed: true,
+        };
+      } catch {
+        metadata = { ...metadata, lineCountComputed: true };
+      }
+    }
+    return metadata;
+  }
+
+  private clearPendingFileMetadata(): void {
+    for (const task of this.fileMetadataTasks.values()) task.controller.abort();
+    this.fileMetadataTasks.clear();
+    this.fileMetadataQueue.length = 0;
+    this.fileMetadataQueueIndex = 0;
+    this.pendingFileMetadataParents.clear();
+    if (this.fileMetadataRefreshTimer) clearTimeout(this.fileMetadataRefreshTimer);
+    this.fileMetadataRefreshTimer = undefined;
+  }
+
+  private scheduleFileMetadataRefresh(parent: vscode.Uri): void {
+    this.pendingFileMetadataParents.set(parent.toString(), parent);
+    if (this.fileMetadataRefreshTimer) return;
+    this.fileMetadataRefreshTimer = setTimeout(() => {
+      this.fileMetadataRefreshTimer = undefined;
+      const parents = [...this.pendingFileMetadataParents.values()];
+      this.pendingFileMetadataParents.clear();
+      for (const uri of parents) this.scheduleDirectoryRefresh(uri);
+    }, 150);
+  }
+
+  private invalidateFileMetadata(uri: vscode.Uri): void {
+    const key = uri.toString();
+    this.fileMetadataCache.delete(key);
+    this.fileMetadataTasks.get(key)?.controller.abort();
+    this.fileMetadataTasks.delete(key);
   }
 
   private watchDirectory(uri: vscode.Uri): void {
@@ -552,7 +639,7 @@ export class ExplorerProvider
     kind: FileSystemChangeKind,
   ): void {
     const parentWasCached = this.dirCache.has(parent.toString());
-    this.fileMetadataCache.delete(uri.toString());
+    this.invalidateFileMetadata(uri);
     this.filter.notifyFileSystemChange(uri, kind);
 
     if (kind === 'changed') {
@@ -574,6 +661,12 @@ export class ExplorerProvider
     const uriKey = uri.toString();
     deleteUriTreeEntries(this.dirCache, uriKey);
     deleteUriTreeEntries(this.fileMetadataCache, uriKey);
+    for (const key of this.fileMetadataTasks.keys()) {
+      if (isUriKeyInTree(uriKey, key)) {
+        this.fileMetadataTasks.get(key)?.controller.abort();
+        this.fileMetadataTasks.delete(key);
+      }
+    }
     deleteUriTreeEntries(this.directoryNodes, uriKey);
     for (const [key, watcher] of this.directoryWatchers) {
       if (isUriKeyInTree(uriKey, key) && !this.openTabDirectoryKeys.has(key)) {
@@ -835,24 +928,19 @@ function countLines(bytes: Uint8Array): number {
   return bytes[bytes.length - 1] === 10 ? lines : lines + 1;
 }
 
-async function mapWithConcurrency<T, R>(
-  items: readonly T[],
-  concurrency: number,
-  map: (item: T, index: number) => Promise<R>,
-): Promise<R[]> {
-  if (items.length === 0) return [];
-  const results = new Array<R>(items.length);
-  let nextIndex = 0;
-  const worker = async () => {
-    while (nextIndex < items.length) {
-      const index = nextIndex++;
-      results[index] = await map(items[index], index);
+async function countFileLines(filePath: string, signal: AbortSignal): Promise<number> {
+  let lines = 0;
+  let lastByte = -1;
+  for await (const chunk of fs.createReadStream(filePath, { signal })) {
+    const bytes = chunk as Buffer;
+    let offset = 0;
+    while ((offset = bytes.indexOf(10, offset)) !== -1) {
+      lines++;
+      offset++;
     }
-  };
-  await Promise.all(
-    Array.from({ length: Math.min(concurrency, items.length) }, () => worker()),
-  );
-  return results;
+    if (bytes.length > 0) lastByte = bytes[bytes.length - 1];
+  }
+  return lastByte === -1 ? 0 : lastByte === 10 ? lines : lines + 1;
 }
 
 function deleteUriTreeEntries<T>(map: Map<string, T>, rootKey: string): void {
