@@ -88,10 +88,17 @@ export class PullRequestCommentDecorationProvider
   private readonly scheduleRefresh = debounce(() => {
     void this.refresh();
   }, 500);
+  private readonly scheduleContextRefresh = debounce(() => {
+    const key = this.currentContextKey();
+    if (key === this.lastContextKey) return;
+    this.lastContextKey = key;
+    void this.refresh();
+  }, 500);
 
   private git: GitAPI | undefined;
   private decorations = new Map<string, PullRequestFileDecoration>();
   private refreshToken = 0;
+  private lastContextKey: string | undefined;
 
   constructor() {
     this.disposables.push(
@@ -99,8 +106,8 @@ export class PullRequestCommentDecorationProvider
       vscode.authentication.onDidChangeSessions((event) => {
         if (event.provider.id === 'github') this.scheduleRefresh();
       }),
-      vscode.workspace.onDidChangeWorkspaceFolders(() => this.scheduleRefresh()),
-      vscode.window.onDidChangeActiveTextEditor(() => this.scheduleRefresh()),
+      vscode.workspace.onDidChangeWorkspaceFolders(() => this.scheduleContextRefresh()),
+      vscode.window.onDidChangeActiveTextEditor(() => this.scheduleContextRefresh()),
     );
     void this.bootstrapGit();
   }
@@ -109,6 +116,7 @@ export class PullRequestCommentDecorationProvider
     const token = ++this.refreshToken;
     try {
       const context = this.resolvePullRequestContext();
+      this.lastContextKey = this.contextKey(context);
       if (!context) {
         this.applyDecorations(new Map(), token);
         if (options.showStatus) {
@@ -252,20 +260,34 @@ export class PullRequestCommentDecorationProvider
     this.disposables.push(
       this.git.onDidOpenRepository((repository) => {
         this.attachRepository(repository);
-        this.scheduleRefresh();
+        this.scheduleContextRefresh();
       }),
       this.git.onDidCloseRepository((repository) => {
         this.repoDisposables.get(repository)?.dispose();
         this.repoDisposables.delete(repository);
-        this.scheduleRefresh();
+        this.scheduleContextRefresh();
       }),
     );
-    this.scheduleRefresh();
+    this.scheduleContextRefresh();
   }
 
   private attachRepository(repository: Repository): void {
     if (this.repoDisposables.has(repository)) return;
-    this.repoDisposables.set(repository, repository.state.onDidChange(() => this.scheduleRefresh()));
+    this.repoDisposables.set(repository, repository.state.onDidChange(() => this.scheduleContextRefresh()));
+  }
+
+  private currentContextKey(): string | undefined {
+    return this.contextKey(this.resolvePullRequestContext());
+  }
+
+  private contextKey(context: PullRequestLookupContext | undefined): string | undefined {
+    if (!context) return undefined;
+    return JSON.stringify([
+      context.repository.rootUri.toString(),
+      context.branchName,
+      context.baseRemotes,
+      context.headRemotes,
+    ]);
   }
 
   private resolvePullRequestContext(): PullRequestLookupContext | undefined {
