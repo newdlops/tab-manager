@@ -16,6 +16,7 @@ import { PullRequestCommentDecorationProvider } from './pullRequestComments';
 import { UnsavedDecorationProvider } from './unsavedDecorations';
 import { debounce } from './util';
 import { ComparisonSource } from './comparisonSource';
+import { disposeRepositorySource } from './gitRepositorySource';
 
 const FILTER_CLEAR_COMMAND_ALIASES = {
   'tabManager.filter.clearModified': 'modified',
@@ -62,6 +63,7 @@ function joinDescription(parts: Array<string | undefined>): string | undefined {
 }
 
 export function activate(context: vscode.ExtensionContext) {
+  context.subscriptions.push(new vscode.Disposable(disposeRepositorySource));
   const store = new GroupStore(context);
   const pullRequestCommentDecorations = new PullRequestCommentDecorationProvider();
   const comparisonSource = new ComparisonSource();

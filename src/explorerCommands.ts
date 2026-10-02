@@ -519,8 +519,18 @@ async function compareWithBranch(provider: ExplorerProvider, uri: vscode.Uri): P
     uri,
     `Failed to compare "${baseName(uri)}" with branch`,
     async () => {
-      const git = await getGitApi();
-      if (!git) return;
+      const git = await getGitApi(uri);
+      if (!git) {
+        const comparison = ['newdlops.gitsimplecompare', 'newdlops.git-simple-compare']
+          .map(id => vscode.extensions.getExtension(id)).find(Boolean);
+        if (comparison) {
+          await comparison.activate();
+          await vscode.commands.executeCommand('gitSimpleCompare.compareFileWithBranch', uri);
+        } else {
+          vscode.window.showWarningMessage('Enable built-in Git or install Git Simple Compare to compare this file with a branch.');
+        }
+        return;
+      }
 
       const repository = git.getRepository(uri);
       if (!repository) {
@@ -550,20 +560,15 @@ async function compareWithBranch(provider: ExplorerProvider, uri: vscode.Uri): P
   );
 }
 
-async function getGitApi(): Promise<GitAPI | undefined> {
+/** 해당 파일의 Git 설정을 확인하고 중단·초기화 실패 때 비교 확장으로 넘길 수 있게 한다. */
+async function getGitApi(uri: vscode.Uri): Promise<GitAPI | undefined> {
+  if (!vscode.workspace.getConfiguration('git', uri).get<boolean>('enabled', true)) return undefined;
   const extension = vscode.extensions.getExtension<GitExtension>('vscode.git');
-  if (!extension) {
-    vscode.window.showWarningMessage('The built-in Git extension is not available.');
-    return undefined;
-  }
-
-  const git = extension.isActive ? extension.exports : await extension.activate();
-  if (!git.enabled) {
-    vscode.window.showWarningMessage('The built-in Git extension is disabled.');
-    return undefined;
-  }
-
-  return git.getAPI(1);
+  if (!extension) return undefined;
+  try {
+    const git = extension.isActive ? extension.exports : await extension.activate();
+    return git.enabled ? git.getAPI(1) : undefined;
+  } catch { return undefined; }
 }
 
 async function getBranchPicks(repository: GitRepository): Promise<BranchPick[]> {

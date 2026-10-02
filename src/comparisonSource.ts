@@ -26,7 +26,7 @@ interface GitSimpleCompareApi {
   getComparison(): PublicComparisonSnapshot | undefined;
 }
 
-const EXTENSION_ID = 'newdlops.git-simple-compare';
+const EXTENSION_IDS = ['newdlops.gitsimplecompare', 'newdlops.git-simple-compare'];
 
 /**
  * Git Simple Compare의 선택적 공개 API를 구독하고 현재 비교 파일을 캐시한다.
@@ -59,7 +59,8 @@ export class ComparisonSource implements vscode.Disposable {
 
   /** 선택적 확장을 안전하게 활성화하고 비교 변경 이벤트를 연결한다. */
   private async bootstrap(): Promise<void> {
-    const extension = vscode.extensions.getExtension<GitSimpleCompareApi>(EXTENSION_ID);
+    const extension = EXTENSION_IDS.map(id => vscode.extensions.getExtension<GitSimpleCompareApi>(id)).find(Boolean);
+    void vscode.commands.executeCommand('setContext', 'tabManager.gitSimpleCompareAvailable', !!extension);
     if (!extension) return;
 
     try {

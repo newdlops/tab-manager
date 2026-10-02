@@ -1,5 +1,13 @@
 .vscode/**
 .vscode-test/**
+out/**
+scripts/**
+.mcp.json
+.codex/**
+.codeidx/**
+.plan/**
+.portmanager/**
+UI_UX_IMPROVEMENT_PLAN.md
 .zoek-rs/**
 .zoek*
 .claude/**
@@ -15,4 +23,3 @@ node_modules/**
 package-lock.json
 media/icon.svg
 *.vsix
-

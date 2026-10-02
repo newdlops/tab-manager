@@ -83,7 +83,9 @@ Or, in VS Code: `Extensions` panel → `...` menu → `Install from VSIX...`.
 ### Requirements
 
 - VS Code `1.85.0` or higher
-- The built-in `vscode.git` extension (bundled with VS Code) is required for git-based filters. Without git, the `Errors` and `Open Tabs Only` filters still work.
+- Git must be installed for Git-based filters and PR context. When built-in Git is disabled or its API is unavailable, Tab Manager shares one read-only Git CLI source across Modified / Untracked / Deleted and PR Files / PR Comments. It refreshes on file and Git metadata changes, with no idle polling.
+- CLI lookup uses `gitSimpleCompare.gitPath`, then `git.path`, then Git from PATH. User, workspace, and folder settings apply. Private GitHub PRs still require GitHub sign-in.
+- Install Git Simple Compare to compare Explorer files with a branch while built-in Git is disabled. Its active comparison filter supports the current Marketplace extension ID.
 
 ## Commands
 

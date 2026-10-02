@@ -3,6 +3,8 @@ import * as fs from 'fs';
 import type { FilterMode } from './groupStore';
 import { resourceUriFor } from './tabUtils';
 import { debounce } from './util';
+import { getRepositorySource, scheduleRepositoryFileRefresh } from './gitRepositorySource';
+import type { GitRepository as Repository, RepositoryAPI as GitAPI } from './gitRepositoryTypes';
 
 enum GitStatus {
   INDEX_MODIFIED = 0,
@@ -23,31 +25,6 @@ enum GitStatus {
   BOTH_ADDED = 15,
   BOTH_DELETED = 16,
   BOTH_MODIFIED = 17,
-}
-
-interface Change {
-  readonly uri: vscode.Uri;
-  readonly status: GitStatus;
-}
-
-interface RepoState {
-  readonly workingTreeChanges: readonly Change[];
-  readonly onDidChange: vscode.Event<void>;
-}
-
-interface Repository {
-  readonly state: RepoState;
-  status(): Promise<void>;
-}
-
-interface GitAPI {
-  readonly repositories: readonly Repository[];
-  readonly onDidOpenRepository: vscode.Event<Repository>;
-  readonly onDidCloseRepository: vscode.Event<Repository>;
-}
-
-interface GitExtension {
-  getAPI(version: 1): GitAPI;
 }
 
 const READONLY_SCHEMES: ReadonlySet<string> = new Set([
@@ -117,6 +94,7 @@ export class FilterSource implements vscode.Disposable {
   readonly onDidChange = this._onDidChange.event;
 
   private git: GitAPI | undefined;
+  private readonly gitReady: Promise<void>;
   private readonly repoDisposables = new Map<Repository, vscode.Disposable>();
   private readonly disposables: vscode.Disposable[] = [];
   private pullRequestFileSource: PullRequestFileSource | undefined;
@@ -159,7 +137,7 @@ export class FilterSource implements vscode.Disposable {
     );
     if (pullRequestFileSource) this.setPullRequestFileSource(pullRequestFileSource);
     if (comparisonFileSource) this.setComparisonFileSource(comparisonFileSource);
-    void this.bootstrapGit();
+    this.gitReady = this.bootstrapGit();
     this.schedulePopulateReadOnly();
   }
 
@@ -183,6 +161,7 @@ export class FilterSource implements vscode.Disposable {
   }
 
   async refresh(): Promise<void> {
+    await this.gitReady;
     this.readonlyPopulationToken++;
     if (this.git) {
       await Promise.all(
@@ -281,6 +260,7 @@ export class FilterSource implements vscode.Disposable {
     uri: vscode.Uri,
     kind: FileSystemChangeKind = 'changed',
   ): boolean {
+    scheduleRepositoryFileRefresh(uri);
     const key = uri.toString();
     if (!this.getOpenTabUriKeySet().has(key)) return false;
 
@@ -447,16 +427,7 @@ export class FilterSource implements vscode.Disposable {
   }
 
   private async bootstrapGit(): Promise<void> {
-    const ext = vscode.extensions.getExtension<GitExtension>('vscode.git');
-    if (!ext) return;
-    if (!ext.isActive) {
-      try {
-        await ext.activate();
-      } catch {
-        return;
-      }
-    }
-    const api = ext.exports.getAPI(1);
+    const api = await getRepositorySource();
     this.git = api;
     for (const repo of api.repositories) this.attach(repo);
     this.disposables.push(

@@ -2,7 +2,7 @@
   "name": "tab-manager",
   "displayName": "Tab Manager",
   "description": "Group, filter, and sort open tabs and workspace files from the activity bar and Explorer.",
-  "version": "0.1.6617",
+  "version": "0.1.6618",
   "publisher": "newdlops",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -1003,7 +1003,7 @@
         },
         {
           "command": "tabManager.explorer.compareWithBranch",
-          "when": "view == tabManagerExplorer && viewItem =~ /^file\\.ext\\.[^.]+$/ && config.git.enabled && !git.missing && gitOpenRepositoryCount != 0",
+          "when": "view == tabManagerExplorer && viewItem =~ /^file\\.ext\\.[^.]+$/ && ((config.git.enabled && !git.missing && gitOpenRepositoryCount != 0) || tabManager.gitSimpleCompareAvailable)",
           "group": "7_compare@4"
         },
         {
@@ -1096,7 +1096,8 @@
     "check-types": "tsc --noEmit",
     "vsce:package": "vsce package --no-dependencies",
     "vsce:publish": "vsce publish --no-dependencies",
-    "clean": "rm -rf dist out *.vsix"
+    "clean": "rm -rf dist out *.vsix",
+    "test:git-disabled": "npm run compile && tsc --project tsconfig.json && node scripts/run-git-disabled-test.mjs"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",

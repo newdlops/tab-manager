@@ -10,46 +10,15 @@ import {
   type PullRequestSummary,
 } from './githubPullRequestApi';
 import { debounce } from './util';
+import { getRepositorySource } from './gitRepositorySource';
+import type {
+  GitRepository as Repository, RepositoryAPI as GitAPI,
+  RepositoryBranch as Branch, RepositoryRemote as Remote,
+} from './gitRepositoryTypes';
 
 export interface PullRequestCommentRefreshOptions {
   createSession?: boolean;
   showStatus?: boolean;
-}
-
-interface GitExtension {
-  getAPI(version: 1): GitAPI;
-}
-
-interface GitAPI {
-  readonly repositories: readonly Repository[];
-  readonly onDidOpenRepository: vscode.Event<Repository>;
-  readonly onDidCloseRepository: vscode.Event<Repository>;
-  getRepository?(uri: vscode.Uri): Repository | null;
-}
-
-interface Repository {
-  readonly rootUri: vscode.Uri;
-  readonly state: RepoState;
-}
-
-interface RepoState {
-  readonly HEAD?: Branch;
-  readonly remotes: readonly Remote[];
-  readonly onDidChange: vscode.Event<void>;
-}
-
-interface Branch {
-  readonly name?: string;
-  readonly upstream?: {
-    readonly remote: string;
-    readonly name: string;
-  };
-}
-
-interface Remote {
-  readonly name: string;
-  readonly fetchUrl?: string;
-  readonly pushUrl?: string;
 }
 
 interface PullRequestLookupContext {
@@ -96,6 +65,7 @@ export class PullRequestCommentDecorationProvider
   }, 500);
 
   private git: GitAPI | undefined;
+  private readonly gitReady: Promise<void>;
   private decorations = new Map<string, PullRequestFileDecoration>();
   private refreshToken = 0;
   private lastContextKey: string | undefined;
@@ -109,12 +79,14 @@ export class PullRequestCommentDecorationProvider
       vscode.workspace.onDidChangeWorkspaceFolders(() => this.scheduleContextRefresh()),
       vscode.window.onDidChangeActiveTextEditor(() => this.scheduleContextRefresh()),
     );
-    void this.bootstrapGit();
+    this.gitReady = this.bootstrapGit();
   }
 
   async refresh(options: PullRequestCommentRefreshOptions = {}): Promise<void> {
     const token = ++this.refreshToken;
     try {
+      await this.gitReady;
+      if (token !== this.refreshToken) return;
       const context = this.resolvePullRequestContext();
       this.lastContextKey = this.contextKey(context);
       if (!context) {
@@ -246,16 +218,7 @@ export class PullRequestCommentDecorationProvider
   }
 
   private async bootstrapGit(): Promise<void> {
-    const ext = vscode.extensions.getExtension<GitExtension>('vscode.git');
-    if (!ext) return;
-    if (!ext.isActive) {
-      try {
-        await ext.activate();
-      } catch {
-        return;
-      }
-    }
-    this.git = ext.exports.getAPI(1);
+    this.git = await getRepositorySource();
     for (const repository of this.git.repositories) this.attachRepository(repository);
     this.disposables.push(
       this.git.onDidOpenRepository((repository) => {

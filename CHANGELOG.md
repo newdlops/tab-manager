@@ -13,6 +13,13 @@ All notable changes are documented here.
 - Improved tab and project row scanning without removing full-path tooltips.
 - Improved keyboard and screen-reader state descriptions and inline input error recovery.
 
+## [0.1.6618] - 2026-10-02
+
+### Fixed
+- Keep PR Files, PR Comments, and Modified / Untracked / Deleted filters working when built-in Git is disabled or its API cannot initialize. Share read-only CLI state, coalesce file and Git metadata events, and support switching Git on or off without reloading.
+- Use Git Simple Compare's configured executable for CLI fallback, including user and workspace settings.
+- Connect the current Git Simple Compare extension ID and make Explorer branch comparison available through that extension when built-in Git is disabled.
+
 ## [0.1.6605]
 
 ### Extended Explorer
